@@ -1,9 +1,24 @@
 import random
 import unittest
-from holdem.__main__ import expand, start_hand, act, legal, view
+from holdem.__main__ import expand, start_hand, act, legal, view, recover_unacted_hand
 
 
 class SixTests(unittest.TestCase):
+    def test_recover_unacted_misaligned_hand(self):
+        s = dict(hand=21, button=4, players=[dict(name=str(i), stack=1000) for i in range(6)])
+        start_hand(s)
+        previous = s['positions']['button']
+        s['button'] = 1
+        s['positions']['button'] = 4
+        s['events'] = [dict(kind='settlement', street='river')]
+        recover_unacted_hand(s)
+        self.assertEqual((s['hand'], s['button']), (22, 5))
+        self.assertEqual(s['positions']['button'], 5)
+        self.assertEqual(s['events'][0]['kind'], 'blind')
+        self.assertEqual(sum(p['stack'] + p['total'] for p in s['players']), 6000)
+        self.assertEqual(previous, 5)
+        with self.assertRaises(ValueError): recover_unacted_hand(s)
+
     def test_expand_and_six_player_games(self):
         s=dict(hand=5,button=0,done=True,players=[dict(name=str(i),stack=n) for i,n in enumerate([980,980,890,1150])],log=[])
         expand(s)

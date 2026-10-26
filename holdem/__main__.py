@@ -4,6 +4,7 @@ import itertools
 import json
 import random
 from collections import Counter
+from datetime import datetime
 from pathlib import Path
 
 STATE = Path('.holdem/state.json')
@@ -207,6 +208,25 @@ def expand(s):
     s['log'].append('扩为六人桌：指南针、闪电各买入 1000；从下一手参与')
 
 
+def recover_unacted_hand(s):
+    """Redeal an unacted hand started by the obsolete four-seat CLI."""
+    previous = s.get('positions', {}).get('button')
+    if (s.get('done') or s.get('street') != 'preflop' or s.get('board')
+            or s.get('log') or not s.get('events')
+            or s['events'][-1].get('kind') != 'settlement'
+            or previous is None or previous == s['button']
+            or sorted(p['total'] for p in s['players']) != [0, 0, 0, 0, 5, 10]
+            or sum(p['stack'] + p['total'] for p in s['players']) != sum(s['initial_stacks'])):
+        raise ValueError('存档不符合未行动错位手牌的安全恢复条件')
+    for p in s['players']:
+        p['stack'] += p['total']
+    s['hand'] -= 1
+    s['button'] = previous
+    for key in ('awards', 'refunds', 'pots'):
+        s.pop(key, None)
+    start_hand(s)
+
+
 def main():
     global STATE
     parser = argparse.ArgumentParser(description='六人德扑工具；座位 0 是用户，1–5 是 Agent 对手')
@@ -215,6 +235,7 @@ def main():
     sub.add_parser('new')
     sub.add_parser('next')
     sub.add_parser('expand', help='已结束的四人桌扩为六人桌')
+    sub.add_parser('recover-unacted', help='重发旧版工具造成的未行动错位手牌')
     t = sub.add_parser('table', help='显示文本牌桌（只读，默认用户视角）')
     t.add_argument('--seat', type=int, choices=range(6), default=0)
     v = sub.add_parser('view'); v.add_argument('--seat', type=int, choices=range(6), default=0)
@@ -229,6 +250,10 @@ def main():
         else:
             s = json.loads(STATE.read_text())
             if args.cmd == 'expand': expand(s)
+            elif args.cmd == 'recover-unacted':
+                recover_unacted_hand(s)
+                backup = STATE.with_name('手牌恢复前_' + datetime.now().astimezone().strftime('%Y%m%d-%H%M%S-%f') + '.json')
+                backup.write_text(STATE.read_text())
             elif args.cmd == 'next':
                 if not s['done']: raise ValueError('当前手牌尚未结束')
                 start_hand(s)
