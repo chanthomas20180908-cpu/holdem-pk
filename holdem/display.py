@@ -51,7 +51,13 @@ def render(v, seat=0):
     widths = [max(sum(2 if unicodedata.east_asian_width(c) in 'WF' else 1 for c in str(row[i])) for row in rows) for i in range(6)]
     for row in rows:
         out.append(' '.join(pad(x, w) for x, w in zip(row[:-1], widths[:-1])) + ' ' + str(row[-1]))
-    out += ['', '本手行动', '─' * 66]
+    return '\n'.join(out + details(v) + [line])
+
+
+def details(v):
+    """Shared complete action history, settlement and legal choices."""
+    players, turn = v['players'], v['turn']
+    out = ['', '本手行动', '─' * 66]
     if not v.get('history_complete'):
         out.append('旧存档：历史明细不完整；以下原始记录不补算金额或阶段。')
         out.extend('  ' + x for x in v.get('log', []))
@@ -88,4 +94,4 @@ def render(v, seat=0):
             choices.append(f'全押（本次投入 {p["stack"]}，本轮累计 {cap}）')
         elif opts['call'] == p['stack']: choices[-1] += '（全押）'
         out += ['', f'{players[turn]["name"]}的操作：' + ' · '.join(choices)]
-    return '\n'.join(out + [line])
+    return out

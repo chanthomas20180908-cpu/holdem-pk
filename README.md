@@ -19,6 +19,22 @@ Codex 按协议调用 `python3 -m holdem`，展示文本牌桌，轮到你时等
 
 运行 `python3 -m unittest discover -s tests -v` 验证。`python3 -m holdem --help` 查看工具入口。
 
+## 高级终端牌桌
+
+默认 `python3 -m holdem table` 保持原来的纯文本输出。可在真实终端中启用彩色牌桌：
+
+```bash
+python3 -m holdem table --style rich
+python3 -m holdem table --style rich --width 120
+python3 -m holdem table --style rich --color never
+```
+
+高级模式使用独立玩家面板、四色花色、行动者高亮及公共牌区域。120 列以上的六人桌采用环桌布局；80–119 列采用两列面板；40–79 列采用单列面板。完整行动记录和结算保留在下方。此模式只使用标准库，无需安装 Rich。
+
+`--color auto|always|never` 默认 auto：仅真实终端自动启用颜色，遵守 `NO_COLOR` 和 `TERM=dumb`；always 可显式覆盖。`--width` 最小 40；自动检测不足 40 列时回退纯文本。`--seat` 和全局 `--state` 仍可使用。
+
+高级牌桌是一次性只读快照，不会自动刷新或执行动作。聊天代码块不保证呈现 ANSI 颜色，Agent 默认仍展示纯文本；在终端重跑命令可查看最新牌局。隔离工作树默认使用各自的 `.holdem/state.json`，查看其他目录的牌局需明确指定 `--state`。
+
 MVP 为你加五名角色对手，固定 5/10 盲注、1000 起始筹码，支持弃牌、过牌、跟注、加注与全押。按钮轮转，破产玩家坐出，存档存在时 new 拒绝覆盖。需要独立新场次时，在另一个工作目录通过 PYTHONPATH 指向本仓库运行工具。
 
 重要边界：同一个 Agent 看过多个视角，无法严格隔离底牌；这版用于验证可玩闭环。多个不足额全押的累积重开加注尚不支持。当前没有常驻 TUI，牌桌由 Agent 在终端排版；暂未提供 Claude Code 专用入口或验收。后续优先根据试玩修正规则与交互，再考虑独立角色上下文和专门 TUI。
