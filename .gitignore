@@ -1,0 +1,4 @@
+.holdem/
+__pycache__/
+*.pyc
+.worktrees/
