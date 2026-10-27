@@ -6,7 +6,7 @@ import math
 import random
 from collections import Counter, defaultdict
 from .__main__ import score, RANKS
-from .ranges import bucket, contexts, weight, VERSION, POST_LABELS, PRE_LABELS
+from .ranges import bucket, contexts, weight, POST_LABELS, PRE_LABELS
 
 NAMES = ['高牌','一对','两对','三条','顺子','同花','葫芦','四条','同花顺']
 DECK = [r+s for r in RANKS for s in 'shdc']
@@ -85,64 +85,185 @@ def range_tables(v, board, events, live):
     return tables,summaries
 
 
+def scenario(v, totals, live, paid, label):
+    """Freeze contributions and eligibility for one explicitly forced response."""
+    hero = v['seat']
+    pots = list(eligible_pots(totals, live))
+    # Match settlement: adjacent contribution levels with the same eligibility
+    # are one pot. Single-contributor levels are refunds, never victories.
+    contested = []
+    for amount, eligible, count in pots:
+        if count == 1:
+            continue
+        if contested and contested[-1]['eligible'] == eligible:
+            contested[-1]['amount'] += amount
+        else:
+            contested.append(dict(amount=amount, eligible=eligible))
+    for n, pot in enumerate(contested):
+        pot['label'] = '主池' if n == 0 else f'边池 {n}'
+    own = [p for p in contested if hero in p['eligible']]
+    contest = sum(p['amount'] for p in own)
+    refund = sum(a for a, e, n in pots if hero in e and n == 1)
+    return dict(label=label, pots=pots, pot_results=own, call=paid,
+                contestable=contest, refund=refund,
+                excluded_pots=[p for p in contested if hero not in p['eligible']],
+                threshold=max(0, paid-refund)/contest if contest else None)
+
+
 def simulate(v, board, live, tables, samples, seed, scenarios=()):
-    rng=random.Random(seed); hero=v['seat']; opponents=[i for i in live if i!=hero]
-    deck=[c for c in DECK if c not in v['hole']+board]
-    missing=5-len(board); records=[]; sw=sw2=0.; wins=ties=equity=0.; uniform=0.
-    groups=defaultdict(lambda:[0.,0.,0.,0])
+    rng = random.Random(seed)
+    hero = v['seat']
+    opponents = [i for i in live if i != hero]
+    deck = [c for c in DECK if c not in v['hole']+board]
+    missing = 5-len(board)
+    records = []
+    sw = sw2 = wins = ties = equity = uniform = 0.
+    groups = defaultdict(lambda: [0., 0., 0., 0])
+    # Cache by eligible set: changing an amount cannot change card outcomes.
+    eligible_sets = {tuple(p['eligible']) for s in scenarios for p in s['pot_results']}
+    outcomes = {e: [0., 0.] for e in eligible_sets}
+    scenario_outcomes = [[0., 0.] for _ in scenarios]
     for _ in range(samples):
-        drawn=rng.sample(deck,missing+2*len(opponents)); final=board+drawn[:missing]
-        vals={hero:score(v['hole']+final)}; w=1.
-        for n,i in enumerate(opponents):
-            h=tuple(sorted(drawn[missing+2*n:missing+2*n+2],key=DECK.index))
-            w*=tables[i].get(h,0.)
-            vals[i]=score(list(h)+final)
-        best=max(vals.values()); winners=[i for i in live if vals[i]==best]
-        share=1/len(winners) if hero in winners else 0.
-        sw+=w; sw2+=w*w; uniform+=share
-        equity+=w*share; wins+=w*(share==1); ties+=w*(0<share<1)
-        payouts=[]
-        for scenario in scenarios:
-            money=0.
-            for amount,eligible,count in scenario['pots']:
-                if hero not in eligible: continue
-                if count==1: money+=amount; continue
-                top=max(vals[i] for i in eligible); ws=[i for i in eligible if vals[i]==top]
-                if hero in ws: money+=amount/len(ws)
-            payouts.append(money-scenario['call'])
-        records.append((w,share,payouts))
+        drawn = rng.sample(deck, missing+2*len(opponents))
+        final = board+drawn[:missing]
+        vals = {hero: score(v['hole']+final)}
+        w = 1.
+        for n, i in enumerate(opponents):
+            h = tuple(sorted(drawn[missing+2*n:missing+2*n+2], key=DECK.index))
+            w *= tables[i].get(h, 0.)
+            vals[i] = score(list(h)+final)
+        best = max(vals.values())
+        winners = [i for i in live if vals[i] == best]
+        share = 1/len(winners) if hero in winners else 0.
+        sw += w
+        sw2 += w*w
+        uniform += share
+        equity += w*share
+        wins += w*(share == 1)
+        ties += w*(0 < share < 1)
+        shares = {}
+        winners_by_set = {}
+        for eligible in eligible_sets:
+            top = max(vals[i] for i in eligible)
+            ws = [i for i in eligible if vals[i] == top]
+            part = 1/len(ws) if hero in ws else 0.
+            shares[eligible] = part
+            winners_by_set[eligible] = sorted(ws, key=lambda i: (i-v['button']-1) % len(v['players']))
+            if len(eligible) > 1:
+                outcomes[eligible][0] += w*(part == 1)
+                outcomes[eligible][1] += w*(0 < part < 1)
+        payouts = []
+        for n, s in enumerate(scenarios):
+            parts = [shares[tuple(p['eligible'])] for p in s['pot_results']]
+            money = s['refund']
+            for p, part in zip(s['pot_results'], parts):
+                if part:
+                    ws = winners_by_set[tuple(p['eligible'])]
+                    money += p['amount']//len(ws) + (ws.index(hero) < p['amount'] % len(ws))
+            # Disjoint outcomes across pots: any sole win, otherwise any split,
+            # otherwise no contested pot won. Direct pickups are kept separate.
+            showdown = [part for p, part in zip(s['pot_results'], parts) if len(p['eligible']) > 1]
+            sole = any(part == 1 for part in showdown)
+            split = not sole and any(0 < part < 1 for part in showdown)
+            scenario_outcomes[n][0] += w*sole
+            scenario_outcomes[n][1] += w*split
+            payouts.append(money-s['call'])
+        records.append((w, share, payouts))
         if missing:
-            group=groups[drawn[0]]; group[0]+=w; group[1]+=w*share; group[2]+=w*w; group[3]+=1
-    if not sw: raise ValueError('范围权重退化，无法计算')
-    eq=equity/sw; ess=sw*sw/sw2
-    se=math.sqrt(sum(w*w*(x-eq)**2 for w,x,_ in records))/sw
-    estimates=[]
-    for n,s in enumerate(scenarios):
-        ev=sum(w*ps[n] for w,_,ps in records)/sw
-        err=1.96*math.sqrt(sum(w*w*(ps[n]-ev)**2 for w,_,ps in records))/sw
-        estimates.append(dict(**s,ev=ev,error=err))
-    return dict(equity=eq,win=wins/sw,tie=ties/sw,loss=1-(wins+ties)/sw,
-                uniform=uniform/samples,ess=ess,error=1.96*se,groups=dict(groups),estimates=estimates)
+            group = groups[drawn[0]]
+            group[0] += w
+            group[1] += w*share
+            group[2] += w*w
+            group[3] += 1
+    if not sw:
+        raise ValueError('范围权重退化，无法计算')
+    eq = equity/sw
+    ess = sw*sw/sw2
+    se = math.sqrt(sum(w*w*(x-eq)**2 for w, x, _ in records))/sw
+    estimates = []
+    for n, s in enumerate(scenarios):
+        ev = sum(w*ps[n] for w, _, ps in records)/sw
+        err = 1.96*math.sqrt(sum(w*w*(ps[n]-ev)**2 for w, _, ps in records))/sw
+        pots = []
+        for p in s['pot_results']:
+            direct = len(p['eligible']) == 1
+            win, tie = outcomes[tuple(p['eligible'])]
+            pots.append(dict(**p, direct=direct, win=None if direct else win/sw,
+                             tie=None if direct else tie/sw,
+                             loss=None if direct else max(0., 1-(win+tie)/sw)))
+        direct = bool(pots) and all(p['direct'] for p in pots)
+        win, tie = scenario_outcomes[n]
+        estimates.append(dict(s, pot_results=pots, ev=ev, error=err, direct=direct,
+                              win=None if direct or not pots else win/sw,
+                              tie=None if direct or not pots else tie/sw,
+                              loss=None if direct or not pots else max(0., 1-(win+tie)/sw)))
+    return dict(equity=eq, win=wins/sw, tie=ties/sw, loss=max(0., 1-(wins+ties)/sw),
+                uniform=uniform/samples, ess=ess, error=1.96*se, groups=dict(groups), estimates=estimates)
 
 
-def cost_scenarios(v,live):
-    seat=v['seat']; call=v['legal'].get('call',0); players=v['players']
-    current=max(p['bet'] for p in players)
-    pending=[i for i in live if i!=seat and players[i]['stack']>0 and players[i]['bet']<current]
-    totals=[p['total'] for p in players]; totals[seat]+=call
-    result=[]
-    for mode in (['其余未回应者弃牌','其余未回应者跟平'] if pending else ['当前跟注']):
-        ts=totals[:]; eligible=live[:]
+def cost_scenarios(v, live):
+    seat = v['seat']
+    call = v['legal'].get('call', 0)
+    players = v['players']
+    current = max(p['bet'] for p in players)
+    pending = [i for i in live if i != seat and players[i]['stack'] > 0 and players[i]['bet'] < current]
+    totals = [p['total'] for p in players]
+    totals[seat] += call
+    result = []
+    for mode in (['其余未回应者弃牌', '其余未回应者跟平'] if pending else ['当前跟注']):
+        ts = totals[:]
+        eligible = live[:]
         if pending:
-            if mode.endswith('弃牌'): eligible=[i for i in live if i not in pending]
+            if mode.endswith('弃牌'):
+                eligible = [i for i in live if i not in pending]
             else:
-                for i in pending: ts[i]+=min(players[i]['stack'],current-players[i]['bet'])
-        pots=list(eligible_pots(ts,eligible))
-        contest=sum(a for a,e,n in pots if seat in e and n>1)
-        refund=sum(a for a,e,n in pots if seat in e and n==1)
-        result.append(dict(label=mode,pots=pots,call=call,contestable=contest,
-                           threshold=max(0,call-refund)/contest if contest else None))
-    return result,pending
+                for i in pending:
+                    ts[i] += min(players[i]['stack'], current-players[i]['bet'])
+        result.append(scenario(v, ts, eligible, call, mode))
+    return result, pending
+
+
+def action_scenarios(v, live, base):
+    """Legal concrete choices; no probabilities are assigned to responses."""
+    seat = v['seat']
+    hero = v['players'][seat]
+    legal = v['legal']
+    call = legal.get('call', 0)
+    checking = legal.get('check', False)
+    label = '过牌' if checking else ('全押跟注 ' if call == hero['stack'] else '跟注 ')+str(call)
+    choices = [dict(action='check' if checking else 'call', label=label, paid=call,
+                    indices=list(range(len(base))), risk='免费留场' if checking else '支付跟注，继续争夺')]
+    scenarios = list(base)
+    minimum, cap = legal.get('raise_to_min'), legal.get('raise_to_max')
+    current = max(p['bet'] for p in v['players'])
+    if minimum is not None and cap is not None and cap > current:
+        pot_after_call = sum(p['total'] for p in v['players'])+call
+        targets = sorted({min(cap, max(minimum, current+math.ceil(pot_after_call/2))),
+                          min(cap, max(minimum, current+pot_after_call)), cap})
+        for target in targets:
+            paid = target-hero['bet']
+            all_in = target == cap
+            label = ('全押到 ' if all_in else '下注到 ' if current == 0 else '加注到 ')+str(target)
+            indices = []
+            for fold in (False, True):
+                totals = [p['total'] for p in v['players']]
+                totals[seat] += paid
+                eligible = live[:]
+                for i in live:
+                    if i == seat or v['players'][i]['stack'] == 0:
+                        continue  # An already all-in opponent cannot fold.
+                    if fold:
+                        eligible.remove(i)
+                    else:
+                        totals[i] += min(v['players'][i]['stack'], max(0, target-v['players'][i]['bet']))
+                indices.append(len(scenarios))
+                scenarios.append(scenario(v, totals, eligible, paid,
+                                          '可回应者全部弃牌' if fold else '可回应者全部跟平'))
+            choices.append(dict(action='raise', label=label, paid=paid, target=target,
+                                indices=indices, risk='投入全部筹码' if all_in else '追加投入；可能遭反加'))
+    if legal.get('fold', True):
+        choices.append(dict(action='fold', label='弃牌', paid=0, indices=[], risk='放弃争夺，不再追加投入'))
+    return choices, scenarios
 
 
 def own_paths(v, simulation, tables):
@@ -221,7 +342,9 @@ def replay(v,samples,seed):
         tables,_=range_tables(v,board,history,live)
         sim=simulate(v,board,live,tables,samples,seed)
         previous=result[-1]['equity'] if result else sim['equity']
-        result.append(dict(label=label,equity=sim['equity'],delta=sim['equity']-previous,error=sim['error'],ess=sim['ess']))
+        previous_win = result[-1]['win'] if result else sim['win']
+        result.append(dict(label=label,equity=sim['equity'],delta=sim['equity']-previous,
+                           win=sim['win'],win_delta=sim['win']-previous_win,error=sim['error'],ess=sim['ess']))
     return result
 
 
@@ -237,117 +360,51 @@ def analyze(v,samples=2000,seed=None,detail=False):
         seed=int.from_bytes(hashlib.sha256(json.dumps([v['hole'],v.get('hand',0),seat]).encode()).digest()[:8],'big')
     live=[i for i,p in enumerate(v['players']) if not p['folded']]
     tables,ranges=range_tables(v,v['board'],v['events'],live)
-    scenarios,pending=cost_scenarios(v,live)
-    if v['turn']!=seat or hero['stack']==0: scenarios=[]; pending=[]
-    sim=simulate(v,v['board'],live,tables,samples,seed,scenarios)
-    current,hand,used=describe(v['hole'],v['board'])
-    result=dict(inactive=False,**sim,samples=samples,current=current,best=hand,used=used,
-                ranges=ranges,history_complete=v['history_complete'],paths=own_paths(v,sim,tables),
-                timeline=replay(v,samples,seed),detail=detail,board=v['board'],hole=v['hole'],
-                live_count=len(live),call=v['legal'].get('call',0),alternative=None)
-    estimates=sim['estimates']
-    if v['turn']!=seat: advice='等待你行动后更新建议。'
-    elif hero['stack']==0: advice='你已全押，等待结算。'
-    elif v['legal'].get('check'): advice='过牌'
-    elif pending or sim['ess']<100 or any(abs(e['ev'])<=e['error'] for e in estimates):
-        advice='条件建议：结果不够稳定，不能确定跟注有利。'
-        if pending: advice+=' 还有其他玩家未回应，需分别看弃牌／跟平情景，并考虑重新加注。'
-    else: advice=('跟注 '+str(result['call'])) if estimates[0]['ev']>0 else '弃牌'
-    result['advice']=advice
-    minimum=v['legal'].get('raise_to_min'); cap=v['legal'].get('raise_to_max')
-    if v['turn']==seat and minimum is not None and cap>=minimum and sim['equity']>.65:
-        target=min(cap,max(minimum,hero['bet']+result['call']+max(10,(sum(p['total'] for p in v['players'])+result['call'])//2)))
-        result['alternative']=f'加注到 {target}：仅作启发式备选，未估计弃牌率及加注收益。'
+    can_act = v['turn'] == seat and hero['stack'] > 0
+    base, pending = cost_scenarios(v, live) if can_act else ([], [])
+    choices, scenarios = action_scenarios(v, live, base) if can_act else ([], [])
+    # The headline uses a specified flat-call-to-showdown scenario, too. This
+    # keeps a short stack's final chances tied to the pots it can actually win.
+    totals = [p['total'] for p in v['players']]
+    current_bet = max(p['bet'] for p in v['players'])
+    for i in live:
+        p = v['players'][i]
+        totals[i] += min(p['stack'], max(0, current_bet-p['bet']))
+    headline_paid = totals[seat]-hero['total']
+    headline = scenario(v, totals, live, headline_paid, '全部跟平至摊牌')
+    sim = simulate(v, v['board'], live, tables, samples, seed, scenarios+[headline])
+    estimates = sim['estimates'][:len(base)]
+    comparisons = []
+    for choice in choices:
+        comparisons.append(dict(choice, scenarios=[sim['estimates'][i] for i in choice['indices']]))
+    current, hand, used = describe(v['hole'], v['board'])
+    result = dict(inactive=False, **sim, samples=samples, current=current, best=hand, used=used,
+                  ranges=ranges, history_complete=v['history_complete'], paths=own_paths(v, sim, tables),
+                  timeline=replay(v, samples, seed), detail=detail, board=v['board'], hole=v['hole'],
+                  live_count=len(live), call=v['legal'].get('call', 0), alternative=None,
+                  comparisons=comparisons, can_act=can_act, hand_number=v.get('hand', 0),
+                  seat=seat, player_names=[p['name'] for p in v['players']],
+                  pending=pending, headline=sim['estimates'][-1])
+    result['estimates'] = estimates
+    if v['turn'] != seat:
+        advice, reason = '等待行动', '尚未轮到你，行动比较将在你的回合更新。'
+    elif hero['stack'] == 0:
+        advice, reason = '等待结算', '你已全押，无法再选择行动。'
+    elif v['legal'].get('check'):
+        advice, reason = '过牌', '保守选择：无需追加筹码即可留场；尚未评估对手反加。'
+    elif pending or sim['ess'] < 100 or any(abs(e['ev']) <= e['error'] for e in estimates):
+        advice = '暂不确定（条件建议）'
+        reason = ('还有玩家未回应，请比较其弃牌／跟平情景。' if pending else
+                  '当前判断不够稳定，不能确定追加跟注是否有利。')
+    elif estimates[0]['ev'] > 0:
+        advice, reason = comparisons[0]['label'], '在后续无额外下注的情景下，跟注的估计净收益为正。'
+    else:
+        advice, reason = '弃牌', '在后续无额外下注的情景下，追加跟注的估计净收益为负。'
+    result.update(advice=advice, advice_reason=reason)
     return result
 
 
-def render_analysis(a):
-    from .display import cards,pad
-    line='─'*64; lines=['','辅助分析 · 公开信息推演',line]
-    if a['inactive']: return '\n'.join(lines+[a['reason']])
-    pct=lambda x:f'{x:.1%}'
-    row=lambda k,v:'  '+pad(k,20)+str(v)
-    lines+=['【当前局面】',row('我的牌',a['current']),row('在局人数',a['live_count'])]
-    if a['best']: lines += [row('最佳五张',cards(a['best'])),row('其中我的底牌',cards(a['used']) if a['used'] else '未使用')]
-    lines+=['','【对手可能拿什么】','  以下占比是规则模型权重，不是已知底牌或经校准的真实概率。']
-    for opponent in a['ranges']:
-        lines.append('  '+opponent['name']+'｜依据：'+(' → '.join(opponent['evidence']) or '没有可用动作证据，保持均匀范围'))
-        shown=opponent['groups'] if a['detail'] else [g for n,g in enumerate(opponent['groups']) if n<3 or g['label'] in ('弱牌','其他')]
-        for g in shown:
-            lines.append('    '+g['label']+' '+pct(g['prob'])+' · 例如 '+cards(g['example'])+' → '+g['description'])
-        if a['board']:
-            lines.append('    当前领先我的候选权重 '+pct(opponent['ahead'])+'（仅比较现有公共牌，仍可能被后续逆转）')
-    if not a['history_complete']: lines.append('  历史不完整：未推测缺失动作，已退回随机范围。')
-    lines+=['','【我的关键出路】']
-    if not a['board']:
-        lines+=['  翻牌前先看起手牌结构和参与人数；发出翻牌后展示具体改善与危险来牌。']
-    elif len(a['board'])==5:
-        lines+=['  已到河牌，没有后续补牌。上方候选范围说明可能领先你的成牌；不是对手真实持牌。']
-        for opponent in a['ranges']:
-            lines.append('  '+opponent['name']+'领先我的范围权重：'+pct(opponent['ahead']))
-            for candidate in opponent['leading']:
-                lines.append('    领先示例：'+cards(candidate['hole'])+' → '+candidate['description'])
-    else:
-        lines+=['  “改善”指成牌等级提高，不等于获胜；风险按牌面结构与抽样权益标注。',
-                '  每组为多张来牌合计，风险例只对应指定来牌；各组互斥，概率可相加。']
-        for g in a['paths']['groups']:
-            lines.append('  '+g['label']+f'｜下一张 {len(g["items"])} 张 · '+pct(g['prob']))
-            # Aggregate category and rank routes, leaving every suit explicit in detail mode.
-            bycat=defaultdict(list)
-            for item in g['items']: bycat[item['route']].append(item)
-            for cat,items in bycat.items():
-                byrank=defaultdict(list)
-                for item in items: byrank[item['card'][0]].append(item['card'])
-                labels=[]
-                for rank,values in byrank.items():
-                    known_ranks=[c for c in DECK if c[0]==rank and c not in a['hole']+a['board']]
-                    labels.append(('10' if rank=='T' else rank)+'（所有剩余花色）' if set(values)==set(known_ranks) else cards(values))
-                if len(items)>12:
-                    suit_groups=defaultdict(list)
-                    for rank,values in byrank.items():
-                        suits=tuple(c[1] for c in values)
-                        suit_groups[suits].append('10' if rank=='T' else rank)
-                    suit_symbols=dict(s='♠',h='♥',d='♦',c='♣')
-                    labels=['牌点 '+' / '.join(ranks)+'（均为 '+' / '.join(suit_symbols[s] for s in suits)+'）' for suits,ranks in suit_groups.items()]
-                lines.append('    → '+cat+'：'+' / '.join(labels)+f'（共 {len(items)} 张）')
-            lines.append('    命中后模型权益：'+(pct(g['equity'])+f'（较当前 {(g["equity"]-a["equity"])*100:+.1f} 个百分点）' if g['equity'] is not None else '有效样本不足 100，无法判断'))
-            if g['threat']:
-                t=g['threat']
-                lines.append('    风险例：来 '+cards([t['card']])+' 时，'+t['opponent']+'若持 '+cards(t['hole'])+' 可成 '+t['description']+'，仍领先我。')
-            lines.append('    '+g['items'][0]['reason'])
-        lines.append('  到河牌最终牌型（均匀未知牌枚举；不是获胜率）：')
-        lines.append('    '+' · '.join(NAMES[i]+' '+pct(p) for i,p in enumerate(a['paths']['distribution']) if p))
-        unreachable=[NAMES[i] for i,p in enumerate(a['paths']['distribution']) if not p]
-        if unreachable: lines.append('  不可达：'+' / '.join(unreachable))
-    lines+=['','【权益为什么变化】',row('当前行为加权权益',pct(a['equity'])),row('随机范围参照',pct(a['uniform'])),
-            row('独赢 / 平局 / 落败',' / '.join(pct(a[k]) for k in ('win','tie','loss')))]
-    if a['timeline']:
-        for step in a['timeline']:
-            lines.append('  '+step['label']+' → '+pct(step['equity'])+f'（{step["delta"]*100:+.1f} 个百分点）'+(' · 有效样本不足' if step['ess']<100 else ''))
-        lines.append('  按实际事件顺序逐步重算；属于模型内分解，不是客观因果证明。')
-    else: lines.append('  尚无上个用户行动点或历史不完整，暂不展示变化归因。')
-    lines+=['','【行动建议】',row('建议',a['advice'])]
-    if a['alternative']: lines.append('  备选：'+a['alternative'])
-    for e in a['estimates']:
-        lines.append('  '+e['label']+f'｜跟注 {e["call"]} · 可争夺池 {e["contestable"]}')
-        lines.append('    所需分池加权权益 '+(pct(e['threshold']) if e['threshold'] is not None else '不适用')+f' · 估算净收益 {e["ev"]:+.1f} ±{e["error"]:.1f}（约 95% 抽样区间）')
-    lines+=['  假设此后无额外下注；未回应者的跟平／弃牌是条件情景，不分配发生概率。',
-            '  整体摊牌权益与分池加权门槛口径不同，不能直接比较。',
-            '  净收益区间只反映抽样波动，未覆盖范围估计误差。',
-            '', '【计算口径】',row('模型版本',VERSION+'（人工规则，未校准）'),
-            row('模拟 / 有效样本',f'{a["samples"]} / {a["ess"]:.0f}'),
-            row('权益抽样误差',f'约 95% ±{pct(a["error"])}，不含范围假设误差'),
-            '  成牌概率按均匀未知牌枚举，不含行为范围的阻断效应；权益按范围加权模拟。']
-    if a['ess']<100: lines.append('  有效样本不足，请增加 --samples；不据此给确定盈利建议。')
-    if a['detail']:
-        lines+=['','【逐张下一公共牌】']
-        for x in a['paths']['details']:
-            lines.append('  '+cards([x['card']])+' → '+x['category']+'｜'+x['group']+'｜条件权益 '+(pct(x['equity']) if x['equity'] is not None else '有效样本不足 100，无法判断'))
-        lines+=['','【范围规则】','  翻牌前：强牌 TT+ / AQ / AK；可玩牌为其他对子、双大牌、同花 A、同花相邻牌。',
-                '  加注权重 4/2/1，跟注 2/3/1；庄位及前一位置加注，后两类再乘 1.5。',
-                '  翻牌后：强成牌（两对以上／超对）、普通成牌、听牌、弱牌。成牌优先归类。',
-                '  下注／加注权重 4/2/2/1，跟注 3/3/2/1，过牌不调整。',
-                '  小于半池下注与均匀权重折半；超过一池的非弱牌权重乘 1.5。',
-                '  每次公开行为乘入权重；发牌移除冲突组合，保留非零诈唬范围。']
-    else: lines.append('  --assist-detail 展开逐张来牌、全部候选类型及权重规则。')
-    return '\n'.join(lines+[line])
+def render_analysis(a, *, format='text', width=64):
+    """Render decisions separately from numerical analysis."""
+    from .assist_panel import render
+    return render(a, format=format, width=width)

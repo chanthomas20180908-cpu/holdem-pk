@@ -250,12 +250,20 @@ def main():
     t.add_argument('--color', choices=['auto', 'always', 'never'], default='auto', help='高级牌桌颜色策略')
     t.add_argument('--width', type=int, help='高级牌桌列宽；chat 不足 40 列回退纯文本，rich 最小 40')
     t.add_argument('--assist', action='store_true', help='显示只使用可见信息的概率与行动建议')
-    t.add_argument('--assist-detail', action='store_true', help='展开辅助分析详情，同时开启辅助器')
+    t.add_argument('--assist-detail', action='store_true', help='展开辅助原因与条件情景，同时开启辅助器')
     t.add_argument('--samples', type=int, default=2000, help='辅助模拟次数，100–100000，默认 2000')
+    helper = sub.add_parser('assist', help='独立辅助决策面板（只读）')
+    helper.add_argument('--seat', type=int, choices=range(8), default=0)
+    helper.add_argument('--format', choices=['markdown', 'text'], default='markdown', help='默认 markdown，适合在聊天代码块外展示')
+    helper.add_argument('--detail', action='store_true', help='展开原因与条件情景')
+    helper.add_argument('--samples', type=int, default=2000, help='辅助模拟次数，100–100000，默认 2000')
+    helper.add_argument('--width', type=int, default=64, help='文本面板宽度，最小 40；Markdown 自适应')
     v = sub.add_parser('view'); v.add_argument('--seat', type=int, choices=range(8), default=0)
     a = sub.add_parser('act'); a.add_argument('--seat', type=int, required=True, choices=range(8)); a.add_argument('action', choices=['fold', 'check', 'call', 'raise']); a.add_argument('--to', type=int)
     args = parser.parse_args()
     if args.cmd == 'table' and args.style != 'chat' and args.width is not None and args.width < 40:
+        parser.error('--width 最小为 40')
+    if args.cmd == 'assist' and args.width < 40:
         parser.error('--width 最小为 40')
     STATE = args.state
     try:
@@ -285,12 +293,12 @@ def main():
                 if not s['done']: raise ValueError('当前手牌尚未结束')
                 start_hand(s)
             elif args.cmd == 'act': act(s, args.seat, args.action, args.to)
-        if args.cmd not in ('view', 'table'):
+        if args.cmd not in ('view', 'table', 'assist'):
             STATE.parent.mkdir(parents=True, exist_ok=True)
             temp = STATE.with_suffix('.tmp')
             temp.write_text(json.dumps(s, ensure_ascii=False, indent=2))
             temp.replace(STATE)
-        visible = view(s, args.seat if args.cmd in ('view', 'table') else 0)
+        visible = view(s, args.seat if args.cmd in ('view', 'table', 'assist') else 0)
         if args.cmd == 'table':
             if (args.assist or args.assist_detail) and not 100 <= args.samples <= 100000:
                 raise ValueError('模拟次数必须在 100–100000 之间')
@@ -309,8 +317,12 @@ def main():
             if args.assist or args.assist_detail:
                 from .assist import analyze, render_analysis, public_snapshot
                 analysis = analyze(public_snapshot(visible, args.seat), args.samples, detail=args.assist_detail)
-                output += '\n' + render_analysis(analysis)
+                output += '\n\n' + render_analysis(analysis, width=args.width if args.width is not None else 64)
             print(output)
+        elif args.cmd == 'assist':
+            from .assist import analyze, render_analysis, public_snapshot
+            analysis = analyze(public_snapshot(visible, args.seat), args.samples, detail=args.detail)
+            print(render_analysis(analysis, format=args.format, width=args.width))
         else:
             print(json.dumps(visible, ensure_ascii=False, indent=2))
     except (ValueError, FileNotFoundError) as e:
