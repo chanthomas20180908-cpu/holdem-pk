@@ -238,13 +238,13 @@ def main():
     sub.add_parser('recover-unacted', help='重发旧版工具造成的未行动错位手牌')
     t = sub.add_parser('table', help='显示文本牌桌（只读，默认用户视角）')
     t.add_argument('--seat', type=int, choices=range(6), default=0)
-    t.add_argument('--style', choices=['plain', 'rich'], default='plain', help='牌桌风格，默认纯文本')
+    t.add_argument('--style', choices=['plain', 'rich', 'chat'], default='plain', help='牌桌风格，默认纯文本')
     t.add_argument('--color', choices=['auto', 'always', 'never'], default='auto', help='高级牌桌颜色策略')
-    t.add_argument('--width', type=int, help='高级牌桌列宽，最小 40')
+    t.add_argument('--width', type=int, help='高级牌桌列宽；chat 不足 40 列回退纯文本，rich 最小 40')
     v = sub.add_parser('view'); v.add_argument('--seat', type=int, choices=range(6), default=0)
     a = sub.add_parser('act'); a.add_argument('--seat', type=int, required=True, choices=range(6)); a.add_argument('action', choices=['fold', 'check', 'call', 'raise']); a.add_argument('--to', type=int)
     args = parser.parse_args()
-    if args.cmd == 'table' and args.width is not None and args.width < 40:
+    if args.cmd == 'table' and args.style != 'chat' and args.width is not None and args.width < 40:
         parser.error('--width 最小为 40')
     STATE = args.state
     try:
@@ -270,7 +270,10 @@ def main():
             temp.replace(STATE)
         visible = view(s, args.seat if args.cmd in ('view', 'table') else 0)
         if args.cmd == 'table':
-            if args.style == 'rich':
+            if args.style == 'chat':
+                from .chat import render
+                print(render(visible, args.seat, width=args.width if args.width is not None else 120))
+            elif args.style == 'rich':
                 import shutil
                 import sys
                 from .terminal import render, use_color
