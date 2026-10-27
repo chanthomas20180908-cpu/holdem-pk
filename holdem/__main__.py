@@ -239,6 +239,7 @@ def main():
     t = sub.add_parser('table', help='显示文本牌桌（只读，默认用户视角）')
     t.add_argument('--seat', type=int, choices=range(6), default=0)
     t.add_argument('--assist', action='store_true', help='显示只使用可见信息的概率与行动建议')
+    t.add_argument('--assist-detail', action='store_true', help='展开辅助分析详情，同时开启辅助器')
     t.add_argument('--samples', type=int, default=2000, help='辅助模拟次数，100–100000，默认 2000')
     v = sub.add_parser('view'); v.add_argument('--seat', type=int, choices=range(6), default=0)
     a = sub.add_parser('act'); a.add_argument('--seat', type=int, required=True, choices=range(6)); a.add_argument('action', choices=['fold', 'check', 'call', 'raise']); a.add_argument('--to', type=int)
@@ -268,11 +269,11 @@ def main():
         visible = view(s, args.seat if args.cmd in ('view', 'table') else 0)
         if args.cmd == 'table':
             from .display import render
-            if args.assist:
+            if args.assist or args.assist_detail:
                 if not 100 <= args.samples <= 100000:
                     raise ValueError('模拟次数必须在 100–100000 之间')
                 from .assist import analyze, render_analysis, public_snapshot
-                analysis = analyze(public_snapshot(visible, args.seat), args.samples)
+                analysis = analyze(public_snapshot(visible, args.seat), args.samples, detail=args.assist_detail)
                 print(render(visible, args.seat) + '\n' + render_analysis(analysis))
             else:
                 print(render(visible, args.seat))
