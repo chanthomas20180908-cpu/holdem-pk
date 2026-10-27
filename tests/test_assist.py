@@ -39,13 +39,15 @@ class AssistTests(unittest.TestCase):
         self.assertEqual(a['advice'],'过牌')
         self.assertIn('公共牌即可组成',a['current'])
 
-    def test_nuts_only_alternative_raise(self):
+    def test_nuts_can_recommend_value_raise(self):
         v=self.fixture(); v['board']=['Ts','Js','Qs','2c','3c']
         v['players'][0]['hole']=['Ks','As']
         a=analyze(public_snapshot(v),100,1)
         self.assertEqual(a['win'],1)
-        self.assertEqual(a['advice'],'过牌')
-        self.assertIn('20',a['alternative'])
+        self.assertEqual(a['prediction']['best']['action'],'raise')
+        self.assertEqual(a['advice'],a['prediction']['best']['label'])
+        self.assertIsNone(a['alternative'])
+        self.assertEqual([c['target'] for c in a['comparisons'] if c['action']=='raise'], [20,30,110])
         self.assertIn('没有后续补牌',render_analysis(a))
 
     def test_no_advice_out_of_turn(self):
@@ -76,7 +78,7 @@ class AssistTests(unittest.TestCase):
         self.assertEqual(e['contestable'],60)
         self.assertAlmostEqual(e['threshold'],1/6)
         self.assertAlmostEqual(e['ev'],10)
-        self.assertEqual(a['advice'],'跟注 10')
+        self.assertEqual(a['advice'],'全押跟注 10')
 
     def test_pending_players_are_conditional_not_fake_sidepot(self):
         v=self.fixture()
@@ -87,9 +89,10 @@ class AssistTests(unittest.TestCase):
         a=analyze(public_snapshot(v),100,1)
         self.assertEqual(len(a['estimates']),2)
         self.assertEqual([e['contestable'] for e in a['estimates']],[65,90])
-        self.assertAlmostEqual(a['estimates'][0]['ev'],2.5)
+        self.assertAlmostEqual(a['estimates'][0]['ev'],2)  # Odd chip goes left of the button.
         self.assertAlmostEqual(a['estimates'][1]['ev'],0)
-        self.assertIn('条件建议',a['advice'])
+        self.assertNotIn('不确定',a['advice'])
+        self.assertIn(a['advice'],[c['label'] for c in a['prediction']['actions']])
 
     def test_inactive(self):
         v=self.fixture(); v['done']=True
@@ -107,10 +110,10 @@ class AssistTests(unittest.TestCase):
         self.assertEqual(sum(len(g['items']) for g in a['paths']['groups']),46)
         self.assertEqual(len({x['card'] for x in a['paths']['details']}),46)
         text=render_analysis(a)
-        self.assertIn('不可达',text); self.assertIn('逐张下一公共牌',text)
+        self.assertNotIn('不可达',text); self.assertIn('关键来牌展开',text)
         self.assertIn('K ♦',text)
         a['detail']=False
-        self.assertNotIn('【逐张下一公共牌】',render_analysis(a))
+        self.assertNotIn('【关键来牌展开】',render_analysis(a))
 
     def test_range_rules_and_public_action_changes_equity(self):
         self.assertEqual(bucket(['As','Kh'],[]),0)
@@ -191,7 +194,8 @@ class AssistTests(unittest.TestCase):
             second=subprocess.run(command,check=True,capture_output=True,text=True).stdout
             self.assertEqual(first,second)
             self.assertEqual(p.read_bytes(),before)
-            self.assertIn('【范围规则】',first)
+            self.assertIn('【对手公开证据】',first)
+            self.assertNotIn('【范围规则】',first)
             plain=subprocess.run(command[:-3],check=True,capture_output=True,text=True).stdout
             self.assertNotIn('辅助分析',plain)
 
