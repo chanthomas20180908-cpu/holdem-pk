@@ -187,6 +187,10 @@ def view(s, seat):
     result = dict(hand=s['hand'], button=s['button'], street=s['street'], board=s['board'], pot=sum(p['total'] for p in s['players']) if not s['done'] else 0, turn=s['turn'], done=s['done'], players=[{k: v for k, v in p.items() if k != 'hole' or i == seat or (s['done'] and not p['folded'] and len(active(s)) > 1)} for i, p in enumerate(s['players'])], legal=legal(s), log=s['log'])
     for key in ['events', 'positions', 'initial_stacks', 'hand_start_stacks', 'awards', 'refunds', 'pots']:
         if key in s: result[key] = s[key]
+    result['mode'] = s.get('mode', 'standard')
+    if result['mode'] == 'gambler' and seat != 0:
+        from .profiles import profile
+        result['decision_profile'] = profile(seat)
     result['history_complete'] = s.get('history_complete', False)
     # Awards from a previous hand must never appear in an active hand.
     if not s['done']:
@@ -214,6 +218,7 @@ def main():
     sub = parser.add_subparsers(dest='cmd', required=True)
     n = sub.add_parser('new')
     n.add_argument('--players', type=int, choices=[6, 8], default=6)
+    n.add_argument('--mode', choices=['standard', 'gambler'], default='standard', help='标准或老赌鬼模式；仅新场次可设置')
     rename = sub.add_parser('rename', help='修改当前桌全部对手昵称，保留牌局进度')
     rename.add_argument('names', nargs='+')
     sub.add_parser('next')
@@ -228,7 +233,7 @@ def main():
         if args.cmd == 'new':
             if STATE.exists(): raise ValueError('已有存档；请换工作目录开始新场次，避免覆盖')
             names = ['你', '岩石', '猎狐', '浪潮', '指南针', '闪电', '山猫', '远帆'][:args.players]
-            s = dict(hand=0, button=len(names)-1, players=[dict(name=n, stack=1000) for n in names])
+            s = dict(mode=args.mode, hand=0, button=len(names)-1, players=[dict(name=n, stack=1000) for n in names])
             start_hand(s)
         else:
             s = json.loads(STATE.read_text())

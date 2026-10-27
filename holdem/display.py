@@ -39,6 +39,7 @@ def render(v, seat=0):
     turn = v['turn']
     line = '═' * 66
     out = [line, f'第 {v["hand"]} 手 · {STREETS[v["street"]]} · ' + ('已结束' if v['done'] else f'当前行动：{players[turn]["name"]}'),
+           f'模式：{"老赌鬼" if v.get("mode", "standard") == "gambler" else "标准"}',
            f'盲注 5 / 10    庄位：{players[v["button"]]["name"]}', line,
            f'公共牌    {cards(v["board"])}', f'你的底牌  {cards(players[seat].get("hole", []))}',
            f'底池：{v["pot"]}' + (f'    当前玩家跟注需付：{v["legal"]["call"]}' if not v['done'] else ''), '']

@@ -32,3 +32,14 @@ MVP 为你加五名角色对手，固定 5/10 盲注、1000 起始筹码，支�
 可用全局参数 `--state /绝对路径/state.json` 指定已有存档，例如在隔离 worktree 中查看主目录存档；`table` 为只读操作。
 
 旧四人存档在本手结束后运行 `python3 -m holdem expand`，保留原筹码，新增指南针与闪电各买入 1000，然后 `next` 开始六人牌局；进行中的手牌拒绝扩桌。
+
+## 老赌鬼模式
+
+```bash
+python3 -m holdem --state .holdem/gambler.json new --players 8 --mode gambler
+python3 -m holdem --state .holdem/gambler.json table
+```
+
+`--mode` 仅在 `new` 时设置，默认 `standard`。请为新桌指定不存在的独立路径；旧存档按标准模式兼容，进行中的牌桌不受影响。实际工作产物存档请使用带本机微秒时间戳的唯一名称。
+
+赌鬼模式由主持 Agent 按 `GAMBLER.md` 和当前席 view 返回的 `decision_profile` 执行，包含七席侧重、强牌设局、有条件诈唬和公开行动观察。Python 不运行自动机器人，也不保证模型执行质量。模式不提供严格信息隔离，难度需实际试玩验证。
