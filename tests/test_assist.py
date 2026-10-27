@@ -67,3 +67,21 @@ class AssistTests(unittest.TestCase):
         self.assertTrue(analyze(public_snapshot(v),100)['inactive'])
         v['done']=False; v['players'][0]['folded']=True
         self.assertTrue(analyze(public_snapshot(v),100)['inactive'])
+
+    def test_examples_match_visible_cards_and_category(self):
+        from holdem.__main__ import score
+        from holdem.assist import render_analysis
+        v=self.fixture(); v['board']=['Ts','Js','Qs']
+        snapshot=public_snapshot(v)
+        a=analyze(snapshot,100,12)
+        for category,example in enumerate(a['examples']):
+            if example is None: continue
+            runout=example['runout']
+            all_cards=snapshot['hole']+snapshot['board']+runout
+            self.assertEqual(len(runout),2)
+            self.assertEqual(len(set(all_cards)),7)
+            self.assertEqual(score(example['hand']),score(all_cards))
+            self.assertEqual(score(example['hand'])[0],category)
+        text=render_analysis(a)
+        self.assertIn('五张牌示例',text)
+        self.assertIn('需补公共牌',text)

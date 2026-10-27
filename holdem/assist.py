@@ -1,5 +1,6 @@
 """Read-only advice over an explicit public-information snapshot."""
 import random
+import itertools
 import math
 from .__main__ import score, RANKS
 
@@ -39,6 +40,7 @@ def analyze(v, samples=2000, seed=None):
     live = [seat] + opponents
     rng = random.Random(seed)
     wins = ties = 0; equity = 0.; categories = [0]*9; expected = 0.
+    examples = [None]*9
     options = v['legal']; call = options.get('call', 0)
     totals = [p['total'] for p in v['players']]; totals[seat] += call
     pots = list(eligible_pots(totals, live))
@@ -55,7 +57,12 @@ def analyze(v, samples=2000, seed=None):
         if seat in winners:
             wins += len(winners) == 1; ties += len(winners) > 1
             equity += 1/len(winners)
-        categories[values[seat][0]] += 1
+        category = values[seat][0]
+        categories[category] += 1
+        if examples[category] is None:
+            hand = next(list(h) for h in itertools.combinations(v['hole']+board, 5)
+                        if score(h) == values[seat])
+            examples[category] = dict(hand=hand, runout=board[len(v['board']):])
         for amount, eligible, count in pots:
             if seat not in eligible or count == 1: continue
             top = max(values[i] for i in eligible)
@@ -64,7 +71,7 @@ def analyze(v, samples=2000, seed=None):
     eq = equity/samples
     result = dict(inactive=False, samples=samples, win=wins/samples, tie=ties/samples,
                   loss=1-(wins+ties)/samples, equity=eq,
-                  categories=[x/samples for x in categories],
+                  categories=[x/samples for x in categories], examples=examples,
                   current=NAMES[score(known)[0]] if len(known)>=5 else '起手牌（尚未发翻牌）',
                   margin=1.96*math.sqrt(.25/samples), call=call,
                   contestable=contestable, threshold=net_call/contestable if contestable else None,
@@ -88,18 +95,37 @@ def analyze(v, samples=2000, seed=None):
 
 
 def render_analysis(a):
-    if a['inactive']: return '\n辅助分析 · 用户视角\n'+a['reason']
-    pct=lambda x:f'{x:.1%}'
-    lines=['\n辅助分析 · 用户视角', '当前牌型：'+a['current'],
-           '对手模型：未弃牌对手均匀随机手牌；未知牌独立模拟',
-           f'摊牌估算：独赢 {pct(a["win"])} · 平局 {pct(a["tie"])} · 落败 {pct(a["loss"])}',
-           '底池权益（摊牌平分份额）：'+pct(a['equity']),
-           '到河牌最终牌型：'+' · '.join(f'{name} {pct(p)}' for name,p in zip(NAMES,a['categories']) if p),
-           f'模拟：{a["samples"]} 次 · 单项比例约 95% 抽样误差上限 ±{pct(a["margin"])}（不含对手模型误差）']
+    from .display import pad, cards
+    line = '─' * 58
+    lines = ['', '辅助分析 · 用户视角', line]
+    if a['inactive']:
+        return '\n'.join(lines + [a['reason']])
+    pct = lambda x: f'{x:.1%}'
+    row = lambda label, value: '  ' + pad(label, 18) + str(value)
+    lines += ['【行动建议】', row('推荐动作', a['advice'])]
     if 'reason' in a:
-        threshold=pct(a['threshold']) if a['threshold'] is not None else '不适用'
-        lines += [f'跟注成本：{a["call"]} · 跟注后可争夺池：{a["contestable"]} · 所需加权权益：{threshold}',
-                  '多边池按各池胜率分别计算预期分得金额。']
-    lines += ['建议：'+a['advice']]
-    if 'reason' in a: lines += ['依据：'+a['reason']]
+        lines += [row('依据', a['reason']), '', '【跟注评估】',
+                  row('本次跟注', a['call']),
+                  row('跟注后可争夺池', a['contestable']),
+                  row('所需加权权益', pct(a['threshold']) if a['threshold'] is not None else '不适用'),
+                  row('估算跟注净收益', f'{a["call_ev"]:+.1f}'),
+                  '  多边池分别计算预期分得金额；整体摊牌权益不能直接与加权门槛比较。']
+    lines += ['', '【胜率与权益】', row('当前牌型', a['current']),
+              row('独赢', pct(a['win'])), row('平局', pct(a['tie'])),
+              row('落败', pct(a['loss'])), row('摊牌权益', pct(a['equity'])),
+              '  摊牌权益包含平局时分得的份额。', '', '【到河牌的最终牌型】']
+    lines += ['  示例来自独立模拟，不代表真实后续发牌；每类展示一种组合。']
+    for name, probability, example in zip(NAMES, a['categories'], a['examples']):
+        lines.append(row(name, pct(probability)))
+        if example is None:
+            lines.append('    本轮未采样到示例，不代表绝无可能。')
+        else:
+            lines.append('    五张牌示例：' + cards(example['hand']))
+            lines.append('    需补公共牌：' + (cards(example['runout']) if example['runout'] else '无（当前已到河牌）'))
+    lines += ['', '【计算口径】', row('对手范围', '未弃牌对手均匀随机手牌'),
+              row('模拟次数', a['samples']),
+              row('抽样误差', f'单项比例约 95% 上限 ±{pct(a["margin"])}'),
+              '  仅使用自己的底牌与桌面公开信息，未知牌独立模拟。',
+              '  误差不包含对手范围假设造成的偏差。',
+              '  跟注评估假设之后无额外下注；加注为启发式建议。', line]
     return '\n'.join(lines)
