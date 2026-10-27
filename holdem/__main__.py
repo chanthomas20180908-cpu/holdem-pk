@@ -241,6 +241,9 @@ def main():
     t.add_argument('--style', choices=['plain', 'rich', 'chat'], default='plain', help='牌桌风格，默认纯文本')
     t.add_argument('--color', choices=['auto', 'always', 'never'], default='auto', help='高级牌桌颜色策略')
     t.add_argument('--width', type=int, help='高级牌桌列宽；chat 不足 40 列回退纯文本，rich 最小 40')
+    t.add_argument('--assist', action='store_true', help='显示只使用可见信息的概率与行动建议')
+    t.add_argument('--assist-detail', action='store_true', help='展开辅助分析详情，同时开启辅助器')
+    t.add_argument('--samples', type=int, default=2000, help='辅助模拟次数，100–100000，默认 2000')
     v = sub.add_parser('view'); v.add_argument('--seat', type=int, choices=range(6), default=0)
     a = sub.add_parser('act'); a.add_argument('--seat', type=int, required=True, choices=range(6)); a.add_argument('action', choices=['fold', 'check', 'call', 'raise']); a.add_argument('--to', type=int)
     args = parser.parse_args()
@@ -270,18 +273,25 @@ def main():
             temp.replace(STATE)
         visible = view(s, args.seat if args.cmd in ('view', 'table') else 0)
         if args.cmd == 'table':
+            if (args.assist or args.assist_detail) and not 100 <= args.samples <= 100000:
+                raise ValueError('模拟次数必须在 100–100000 之间')
             if args.style == 'chat':
                 from .chat import render
-                print(render(visible, args.seat, width=args.width if args.width is not None else 120))
+                output = render(visible, args.seat, width=args.width if args.width is not None else 120)
             elif args.style == 'rich':
                 import shutil
                 import sys
                 from .terminal import render, use_color
                 width = args.width if args.width is not None else shutil.get_terminal_size((100, 30)).columns
-                print(render(visible, args.seat, width=width, color=use_color(args.color, sys.stdout)))
+                output = render(visible, args.seat, width=width, color=use_color(args.color, sys.stdout))
             else:
                 from .display import render
-                print(render(visible, args.seat))
+                output = render(visible, args.seat)
+            if args.assist or args.assist_detail:
+                from .assist import analyze, render_analysis, public_snapshot
+                analysis = analyze(public_snapshot(visible, args.seat), args.samples, detail=args.assist_detail)
+                output += '\n' + render_analysis(analysis)
+            print(output)
         else:
             print(json.dumps(visible, ensure_ascii=False, indent=2))
     except (ValueError, FileNotFoundError) as e:
