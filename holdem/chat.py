@@ -2,7 +2,7 @@
 from .display import STREETS, cards, details, render as plain
 from .terminal import cell_width, join_blocks, wrap
 
-PLAYER_ICONS = ('🧑', '🪨', '🦊', '🌊', '🧭', '⚡')
+PLAYER_ICONS = ('🧑', '🪨', '🦊', '🌊', '🧭', '⚡', '🐱', '⛵')
 ACTION_ICONS = {'弃牌': '❌', '过牌': '✅', '跟注': '🤝', '下注': '🪙', '加注到': '⬆', '全押': '🔥'}
 
 
@@ -59,7 +59,8 @@ def render(v, seat=0, *, width=120):
     positions = v.get('positions', {'button': v['button']})
     stages = ' → '.join('〔' + name + '〕' if stage == v['street'] else name
                         for stage, name in STREETS.items())
-    out = ['━' * width, '🎲 HOLD’EM / 对话高级牌桌',
+    out = ['━' * width, f'🎲 HOLD’EM / 对话高级牌桌 · {len(players)} 人',
+           *wrap('模式：' + ('老赌鬼' if v.get('mode', 'standard') == 'gambler' else '标准'), width),
            *wrap(f'第 {v["hand"]} 手 · {"已结束" if v["done"] else "进行中"} · 盲注 5 / 10 · 庄位：{players[v["button"]]["name"]}', width),
            *wrap(stages, width), '']
 

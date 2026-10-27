@@ -188,6 +188,10 @@ def view(s, seat):
     result = dict(hand=s['hand'], button=s['button'], street=s['street'], board=s['board'], pot=sum(p['total'] for p in s['players']) if not s['done'] else 0, turn=s['turn'], done=s['done'], players=[{k: v for k, v in p.items() if k != 'hole' or i == seat or (s['done'] and not p['folded'] and len(active(s)) > 1)} for i, p in enumerate(s['players'])], legal=legal(s), log=s['log'])
     for key in ['events', 'positions', 'initial_stacks', 'hand_start_stacks', 'awards', 'refunds', 'pots']:
         if key in s: result[key] = s[key]
+    result['mode'] = s.get('mode', 'standard')
+    if result['mode'] == 'gambler' and seat != 0:
+        from .profiles import profile
+        result['decision_profile'] = profile(seat)
     result['history_complete'] = s.get('history_complete', False)
     # Awards from a previous hand must never appear in an active hand.
     if not s['done']:
@@ -229,23 +233,27 @@ def recover_unacted_hand(s):
 
 def main():
     global STATE
-    parser = argparse.ArgumentParser(description='六人德扑工具；座位 0 是用户，1–5 是 Agent 对手')
+    parser = argparse.ArgumentParser(description='多人德扑工具；座位 0 是用户，其余是 Agent 对手')
     parser.add_argument('--state', type=Path, default=STATE, help='存档路径，默认 .holdem/state.json')
     sub = parser.add_subparsers(dest='cmd', required=True)
-    sub.add_parser('new')
+    n = sub.add_parser('new')
+    n.add_argument('--players', type=int, choices=[6, 8], default=6)
+    n.add_argument('--mode', choices=['standard', 'gambler'], default='standard', help='标准或老赌鬼模式；仅新场次可设置')
+    rename = sub.add_parser('rename', help='修改当前桌全部对手昵称，保留牌局进度')
+    rename.add_argument('names', nargs='+')
     sub.add_parser('next')
     sub.add_parser('expand', help='已结束的四人桌扩为六人桌')
     sub.add_parser('recover-unacted', help='重发旧版工具造成的未行动错位手牌')
     t = sub.add_parser('table', help='显示文本牌桌（只读，默认用户视角）')
-    t.add_argument('--seat', type=int, choices=range(6), default=0)
+    t.add_argument('--seat', type=int, choices=range(8), default=0)
     t.add_argument('--style', choices=['plain', 'rich', 'chat'], default='plain', help='牌桌风格，默认纯文本')
     t.add_argument('--color', choices=['auto', 'always', 'never'], default='auto', help='高级牌桌颜色策略')
     t.add_argument('--width', type=int, help='高级牌桌列宽；chat 不足 40 列回退纯文本，rich 最小 40')
     t.add_argument('--assist', action='store_true', help='显示只使用可见信息的概率与行动建议')
     t.add_argument('--assist-detail', action='store_true', help='展开辅助分析详情，同时开启辅助器')
     t.add_argument('--samples', type=int, default=2000, help='辅助模拟次数，100–100000，默认 2000')
-    v = sub.add_parser('view'); v.add_argument('--seat', type=int, choices=range(6), default=0)
-    a = sub.add_parser('act'); a.add_argument('--seat', type=int, required=True, choices=range(6)); a.add_argument('action', choices=['fold', 'check', 'call', 'raise']); a.add_argument('--to', type=int)
+    v = sub.add_parser('view'); v.add_argument('--seat', type=int, choices=range(8), default=0)
+    a = sub.add_parser('act'); a.add_argument('--seat', type=int, required=True, choices=range(8)); a.add_argument('action', choices=['fold', 'check', 'call', 'raise']); a.add_argument('--to', type=int)
     args = parser.parse_args()
     if args.cmd == 'table' and args.style != 'chat' and args.width is not None and args.width < 40:
         parser.error('--width 最小为 40')
@@ -253,11 +261,22 @@ def main():
     try:
         if args.cmd == 'new':
             if STATE.exists(): raise ValueError('已有存档；请换工作目录开始新场次，避免覆盖')
-            s = dict(hand=0, button=5, players=[dict(name=n, stack=1000) for n in ['你', '岩石', '猎狐', '浪潮', '指南针', '闪电']])
+            names = ['你', '岩石', '猎狐', '浪潮', '指南针', '闪电', '山猫', '远帆'][:args.players]
+            s = dict(mode=args.mode, hand=0, button=len(names)-1, players=[dict(name=n, stack=1000) for n in names])
             start_hand(s)
         else:
             s = json.loads(STATE.read_text())
-            if args.cmd == 'expand': expand(s)
+            if args.cmd == 'rename':
+                names = [name.strip() for name in args.names]
+                if len(names) != len(s['players']) - 1:
+                    raise ValueError('请按座位顺序提供全部对手昵称')
+                if any(not name or not name.isprintable() for name in names):
+                    raise ValueError('昵称不能为空或包含控制字符')
+                if len(set([s['players'][0]['name']] + names)) != len(s['players']):
+                    raise ValueError('昵称不能重复')
+                for player, name in zip(s['players'][1:], names):
+                    player['name'] = name
+            elif args.cmd == 'expand': expand(s)
             elif args.cmd == 'recover-unacted':
                 recover_unacted_hand(s)
                 backup = STATE.with_name('手牌恢复前_' + datetime.now().astimezone().strftime('%Y%m%d-%H%M%S-%f') + '.json')

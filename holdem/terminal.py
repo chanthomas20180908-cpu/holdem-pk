@@ -89,8 +89,9 @@ def render(v, seat=0, *, width=100, color=False):
                    '96' if acting else '93' if status == '全押' else '90')
 
     heading = f'第 {v["hand"]} 手 · {STREETS[v["street"]]} · ' + ('已结束' if v['done'] else '进行中')
-    out = [paint('━' * width, '90', color), paint('  HOLD’EM  /  六人牌室', '1;96', color),
-           *wrap(f'  {heading}    盲注 5 / 10', width), '']
+    out = [paint('━' * width, '90', color), paint('  HOLD’EM  /  ' + {6: '六人', 8: '八人'}.get(len(players), str(len(players)) + '人') + '牌室', '1;96', color),
+           *wrap(f'  {heading}    盲注 5 / 10', width),
+           *wrap('模式：' + ('老赌鬼' if v.get('mode', 'standard') == 'gambler' else '标准'), width), '']
     board = [cards([c]) for c in v['board']] + ['·'] * (5 - len(v['board']))
 
     def center(size):
