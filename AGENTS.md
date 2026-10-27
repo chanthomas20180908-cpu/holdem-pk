@@ -6,6 +6,7 @@
 
 - 新场次：`python3 -m holdem new`
 - 展示用户文本牌桌：`python3 -m holdem table`（只读）
+- 可选高级终端牌桌：`python3 -m holdem table --style rich`（只读快照；真实终端呈现颜色，聊天默认仍完整展示纯文本）。支持 `--color auto|always|never`、`--width 120`；不刷新、不代替用户行动。
 - 读取用户结构化牌桌：`python3 -m holdem view`
 - 读取对手视角：`python3 -m holdem view --seat 1`（或 2–5）
 - 执行动作：`python3 -m holdem act --seat 1 call`
