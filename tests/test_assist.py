@@ -39,12 +39,13 @@ class AssistTests(unittest.TestCase):
         self.assertEqual(a['advice'],'过牌')
         self.assertIn('公共牌即可组成',a['current'])
 
-    def test_nuts_stays_conservative_but_compares_raises(self):
+    def test_nuts_can_recommend_value_raise(self):
         v=self.fixture(); v['board']=['Ts','Js','Qs','2c','3c']
         v['players'][0]['hole']=['Ks','As']
         a=analyze(public_snapshot(v),100,1)
         self.assertEqual(a['win'],1)
-        self.assertEqual(a['advice'],'过牌')
+        self.assertEqual(a['prediction']['best']['action'],'raise')
+        self.assertEqual(a['advice'],a['prediction']['best']['label'])
         self.assertIsNone(a['alternative'])
         self.assertEqual([c['target'] for c in a['comparisons'] if c['action']=='raise'], [20,30,110])
         self.assertIn('没有后续补牌',render_analysis(a))
@@ -90,7 +91,8 @@ class AssistTests(unittest.TestCase):
         self.assertEqual([e['contestable'] for e in a['estimates']],[65,90])
         self.assertAlmostEqual(a['estimates'][0]['ev'],2)  # Odd chip goes left of the button.
         self.assertAlmostEqual(a['estimates'][1]['ev'],0)
-        self.assertIn('条件建议',a['advice'])
+        self.assertNotIn('不确定',a['advice'])
+        self.assertIn(a['advice'],[c['label'] for c in a['prediction']['actions']])
 
     def test_inactive(self):
         v=self.fixture(); v['done']=True

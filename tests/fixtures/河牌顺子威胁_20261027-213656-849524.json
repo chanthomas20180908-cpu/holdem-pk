@@ -1,0 +1,253 @@
+{
+  "generated_at": "2026-10-27T21:36:56.849524+08:00",
+  "purpose": "河牌面对140下注时的公开信息回归，截止用户跟注前",
+  "source": "CLI view 白名单快照；剔除最后跟注及之后事件，按此前公开事件还原筹码；不含任何对手底牌",
+  "snapshot": {
+    "seat": 0,
+    "hand": 1,
+    "board": [
+      "5s",
+      "8c",
+      "Td",
+      "5c",
+      "Jd"
+    ],
+    "hole": [
+      "Js",
+      "Qd"
+    ],
+    "players": [
+      {
+        "stack": 940,
+        "bet": 0,
+        "total": 60,
+        "folded": false,
+        "name": "你"
+      },
+      {
+        "stack": 995,
+        "bet": 0,
+        "total": 5,
+        "folded": true,
+        "name": "岩石"
+      },
+      {
+        "stack": 940,
+        "bet": 0,
+        "total": 60,
+        "folded": false,
+        "name": "猎狐"
+      },
+      {
+        "stack": 800,
+        "bet": 140,
+        "total": 200,
+        "folded": false,
+        "name": "浪潮"
+      },
+      {
+        "stack": 975,
+        "bet": 0,
+        "total": 25,
+        "folded": true,
+        "name": "指南针"
+      },
+      {
+        "stack": 1000,
+        "bet": 0,
+        "total": 0,
+        "folded": true,
+        "name": "闪电"
+      }
+    ],
+    "turn": 0,
+    "done": false,
+    "button": 0,
+    "events": [
+      {
+        "kind": "blind",
+        "seat": 1,
+        "paid": 5,
+        "bet": 5
+      },
+      {
+        "kind": "blind",
+        "seat": 2,
+        "paid": 10,
+        "bet": 10
+      },
+      {
+        "kind": "action",
+        "seat": 3,
+        "action": "raise",
+        "paid": 25,
+        "bet": 25,
+        "all_in": false
+      },
+      {
+        "kind": "action",
+        "seat": 4,
+        "action": "call",
+        "paid": 25,
+        "bet": 25,
+        "all_in": false
+      },
+      {
+        "kind": "action",
+        "seat": 5,
+        "action": "fold",
+        "paid": 0,
+        "bet": 0,
+        "all_in": false
+      },
+      {
+        "kind": "action",
+        "seat": 0,
+        "action": "call",
+        "paid": 25,
+        "bet": 25,
+        "all_in": false
+      },
+      {
+        "kind": "action",
+        "seat": 1,
+        "action": "fold",
+        "paid": 0,
+        "bet": 5,
+        "all_in": false
+      },
+      {
+        "kind": "action",
+        "seat": 2,
+        "action": "call",
+        "paid": 15,
+        "bet": 25,
+        "all_in": false
+      },
+      {
+        "kind": "round_end"
+      },
+      {
+        "kind": "deal",
+        "cards": [
+          "5s",
+          "8c",
+          "Td"
+        ]
+      },
+      {
+        "kind": "action",
+        "seat": 2,
+        "action": "check",
+        "paid": 0,
+        "bet": 0,
+        "all_in": false
+      },
+      {
+        "kind": "action",
+        "seat": 3,
+        "action": "raise",
+        "paid": 35,
+        "bet": 35,
+        "all_in": false
+      },
+      {
+        "kind": "action",
+        "seat": 4,
+        "action": "fold",
+        "paid": 0,
+        "bet": 0,
+        "all_in": false
+      },
+      {
+        "kind": "action",
+        "seat": 0,
+        "action": "call",
+        "paid": 35,
+        "bet": 35,
+        "all_in": false
+      },
+      {
+        "kind": "action",
+        "seat": 2,
+        "action": "call",
+        "paid": 35,
+        "bet": 35,
+        "all_in": false
+      },
+      {
+        "kind": "round_end"
+      },
+      {
+        "kind": "deal",
+        "cards": [
+          "5s",
+          "8c",
+          "Td",
+          "5c"
+        ]
+      },
+      {
+        "kind": "action",
+        "seat": 2,
+        "action": "check",
+        "paid": 0,
+        "bet": 0,
+        "all_in": false
+      },
+      {
+        "kind": "action",
+        "seat": 3,
+        "action": "check",
+        "paid": 0,
+        "bet": 0,
+        "all_in": false
+      },
+      {
+        "kind": "action",
+        "seat": 0,
+        "action": "check",
+        "paid": 0,
+        "bet": 0,
+        "all_in": false
+      },
+      {
+        "kind": "round_end"
+      },
+      {
+        "kind": "deal",
+        "cards": [
+          "5s",
+          "8c",
+          "Td",
+          "5c",
+          "Jd"
+        ]
+      },
+      {
+        "kind": "action",
+        "seat": 2,
+        "action": "check",
+        "paid": 0,
+        "bet": 0,
+        "all_in": false
+      },
+      {
+        "kind": "action",
+        "seat": 3,
+        "action": "raise",
+        "paid": 140,
+        "bet": 140,
+        "all_in": false
+      }
+    ],
+    "history_complete": true,
+    "legal": {
+      "fold": true,
+      "check": false,
+      "call": 140,
+      "raise_to_min": 280,
+      "raise_to_max": 940
+    }
+  }
+}

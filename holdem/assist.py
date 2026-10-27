@@ -69,6 +69,7 @@ def range_tables(v, board, events, live):
         tables[i]=weights
         groups=defaultdict(lambda:dict(weight=0.,example=None,example_weight=-1.))
         ahead=equal=0.; leading=[]
+        threats=defaultdict(lambda: dict(weight=0.,combos=0,families=defaultdict(float),examples=[]))
         hero_score=score(v['hole']+board) if len(board)>=3 else None
         labels=POST_LABELS if board else PRE_LABELS
         for h,w in weights.items():
@@ -77,9 +78,21 @@ def range_tables(v, board, events, live):
             if hero_score is not None:
                 theirs=score(list(h)+board)
                 ahead+=w*(theirs>hero_score); equal+=w*(theirs==hero_score)
-                if theirs>hero_score: leading.append((w,list(h)))
+                if theirs>hero_score:
+                    leading.append((w,list(h)))
+                    threat=threats[NAMES[theirs[0]]]
+                    threat['weight']+=w; threat['combos']+=1
+                    ranks=sorted((c[0] for c in h),key=RANKS.index,reverse=True)
+                    family='＋'.join('10' if r=='T' else r for r in ranks)
+                    threat['families'][family]+=w
+                    threat['examples'].append((w,list(h)))
         total=sum(g['weight'] for g in groups.values())
-        summaries.append(dict(leading=[dict(hole=h,description=describe(h,board)[0]) for _,h in sorted(leading,key=lambda x:-x[0])[:2]],ahead=ahead/total,equal=equal/total,seat=i,name=v['players'][i]['name'],
+        grouped_threats=[]
+        for label, group in sorted(threats.items(),key=lambda item:-item[1]['weight']):
+            families=sorted(group['families'],key=lambda family:-group['families'][family])
+            grouped_threats.append(dict(label=label,prob=group['weight']/total,combos=group['combos'],
+                                       families=families,example=max(group['examples'],key=lambda item:item[0])[1]))
+        summaries.append(dict(threats=grouped_threats,leading=[dict(hole=h,description=describe(h,board)[0]) for _,h in sorted(leading,key=lambda x:-x[0])[:2]],ahead=ahead/total,equal=equal/total,seat=i,name=v['players'][i]['name'],
             groups=[dict(label=k,prob=g['weight']/total,example=g['example'],description=describe(g['example'],board)[0]) for k,g in sorted(groups.items(),key=lambda x:-x[1]['weight'])],
             evidence=[('翻牌前' if not a['board'] else {3:'翻牌',4:'转牌',5:'河牌'}[len(a['board'])])+{'raise':'下注／加注','call':'跟注','check':'过牌','fold':'弃牌'}.get(a['action'],a['action']) for a in history]))
     return tables,summaries
@@ -386,20 +399,26 @@ def analyze(v,samples=2000,seed=None,detail=False):
                   seat=seat, player_names=[p['name'] for p in v['players']],
                   pending=pending, headline=sim['estimates'][-1])
     result['estimates'] = estimates
-    if v['turn'] != seat:
+    if can_act:
+        from .predict import predict_actions
+        prediction = predict_actions(v, tables, choices, samples, seed)
+        best = prediction['best']
+        advice = best['label']
+        if best['action'] == 'fold':
+            continued = [c for c in prediction['actions'] if c['action'] != 'fold']
+            reason = ('继续投入的选项预计净收益均不高于零；弃牌避免追加损失。' if all(c['ev'] <= 0 for c in continued)
+                      else '继续投入的收益优势不够稳定，优先避免追加损失。')
+        else:
+            reason = f'综合获胜机会与投入，预计净收益 {best["ev"]:+.1f}，追加筹码亏损概率 {best["loss_risk"]:.1%}。'
+        if prediction['confidence'] == '低':
+            reason += '低信心推荐；收益接近时优先减少投入。'
+        result['prediction'] = prediction
+    elif v['turn'] != seat:
         advice, reason = '等待行动', '尚未轮到你，行动比较将在你的回合更新。'
-    elif hero['stack'] == 0:
-        advice, reason = '等待结算', '你已全押，无法再选择行动。'
-    elif v['legal'].get('check'):
-        advice, reason = '过牌', '保守选择：无需追加筹码即可留场；尚未评估对手反加。'
-    elif pending or sim['ess'] < 100 or any(abs(e['ev']) <= e['error'] for e in estimates):
-        advice = '暂不确定（条件建议）'
-        reason = ('还有玩家未回应，请比较其弃牌／跟平情景。' if pending else
-                  '当前判断不够稳定，不能确定追加跟注是否有利。')
-    elif estimates[0]['ev'] > 0:
-        advice, reason = comparisons[0]['label'], '在后续无额外下注的情景下，跟注的估计净收益为正。'
+        result['prediction'] = None
     else:
-        advice, reason = '弃牌', '在后续无额外下注的情景下，追加跟注的估计净收益为负。'
+        advice, reason = '等待结算', '你已全押，无法再选择行动。'
+        result['prediction'] = None
     result.update(advice=advice, advice_reason=reason)
     return result
 

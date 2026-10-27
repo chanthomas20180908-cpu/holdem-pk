@@ -93,7 +93,7 @@ class DecisionPanelTests(unittest.TestCase):
         self.assertEqual(s['refund'], 0)
         self.assertEqual([p['amount'] for p in s['excluded_pots']], [60])
         text = render_analysis(a, format='markdown')
-        self.assertIn('无资格争夺 边池 1 60', text)
+        self.assertIn('无资格争夺：边池 1', text)
         self.assertNotIn('100.0% / 0.0% /', text)
 
     def test_already_all_in_opponent_cannot_fold(self):
@@ -136,20 +136,23 @@ class DecisionPanelTests(unittest.TestCase):
         v['players'].append(dict(name='未回应', stack=1000, bet=0, total=100, folded=False))
         v['legal'].update(call=30, check=False, raise_to_min=60)
         a = self.analyze(v)
-        self.assertIn('条件建议', a['advice'])
+        self.assertNotIn('不确定', a['advice'])
+        self.assertEqual(a['advice'], a['prediction']['best']['label'])
         self.assertEqual(len(a['comparisons'][0]['scenarios']), 2)
         folded, called = a['comparisons'][0]['scenarios']
         self.assertEqual(folded['pot_results'][0]['eligible'], [0, 1])
         self.assertEqual(called['pot_results'][0]['eligible'], [0, 1, 2])
         self.assertNotIn('probability', folded)
 
-    def test_low_reliability_never_fills_in_zero_odds_or_profit(self):
+    def test_low_confidence_keeps_a_specific_legal_recommendation(self):
         a = self.analyze()
-        a['ess'] = 99
+        self.assertEqual(a['prediction']['confidence'], '低')
         text = render_analysis(a, format='markdown')
-        self.assertIn('暂无法可靠判断', text)
-        self.assertNotRegex(text, r'\d+\.\d+%')
-        self.assertIn('直接拿池（发生率未预测）', text)
+        self.assertIn('信心：低', text)
+        self.assertIn('低信心推荐', text)
+        self.assertIn(a['advice'], [c['label'] for c in a['comparisons']])
+        self.assertNotIn('暂无法可靠判断', text)
+        self.assertRegex(text, r'总获胜 \d+\.\d+%')
 
     def test_not_your_turn_all_in_and_inactive_have_no_actions(self):
         v = self.fixture()
@@ -169,16 +172,16 @@ class DecisionPanelTests(unittest.TestCase):
         text = render_analysis(a, format='markdown')
         positions = [text.index('### '+heading) for heading in ('辅助决策', '最终获胜机会', '选择对比', '为什么')]
         self.assertEqual(positions, sorted(positions))
-        self.assertIn('**建议：过牌**', text)
-        self.assertLessEqual(len(text.splitlines()), 45)
-        self.assertEqual(sum(line.startswith('- **') for line in text.splitlines()), 5)
+        self.assertIn('**建议：过牌 ｜ 信心：', text)
+        self.assertLessEqual(len(text.splitlines()), 55)
+        self.assertEqual(sum(line.startswith('- **') for line in text.split('### 为什么', 1)[1].splitlines()), 5)
         self.assertNotIn('```', text)
         for hidden in ('模型版本', '抽样', '计算口径', '权重', '不可达', '逐张下一公共牌', '到河牌最终牌型'):
             self.assertNotIn(hidden, text)
         a['detail'] = True
         detail = render_analysis(a, format='markdown')
         self.assertIn('对手公开证据', detail)
-        self.assertIn('各选择的取舍', detail)
+        self.assertIn('反加与追加投入', detail)
         self.assertNotIn('范围规则', detail)
 
     def test_long_names_markdown_escaping_text_width_and_card_spacing(self):
@@ -204,6 +207,7 @@ class DecisionPanelTests(unittest.TestCase):
         from itertools import combinations
         from unittest.mock import patch
         from holdem.__main__ import settle
+        from holdem.assist import range_tables, cost_scenarios, action_scenarios, scenario, simulate
 
         v = self.fixture()
         v['players'].append(dict(name='短码', stack=0, bet=0, total=20, folded=False))
@@ -213,11 +217,15 @@ class DecisionPanelTests(unittest.TestCase):
                  for second in combinations([c for c in candidates if c not in first], 2)]
         with patch('holdem.assist.DECK', snapshot['hole']+snapshot['board']+candidates), \
                 patch('holdem.assist.random.Random.sample', side_effect=draws*10):
-            a = analyze(snapshot, 900, seed=3)
+            live = [0, 1, 2]
+            tables, _ = range_tables(snapshot, snapshot['board'], [], live)
+            base, _ = cost_scenarios(snapshot, live)
+            choices, scenarios = action_scenarios(snapshot, live, base)
+            headline = scenario(snapshot, [p['total'] for p in snapshot['players']], live, 0, '当前对手留场')
+            sim = simulate(snapshot, snapshot['board'], live, tables, 900, 3, scenarios+[headline])
+            a = dict(headline=sim['estimates'][-1], comparisons=[dict(c, scenarios=[sim['estimates'][i] for i in c['indices']]) for c in choices])
         self.assertEqual(len(a['headline']['pot_results']), 2)
         self.assertNotEqual(a['headline']['pot_results'][0]['win'], a['headline']['pot_results'][1]['win'])
-        self.assertIn('主池 60：', render_analysis(a, format='markdown'))
-        self.assertIn('暂不将整桌胜率变化归因到各池', render_analysis(a, format='markdown'))
         for choice in a['comparisons']:
             for estimate in choice['scenarios']:
                 ev = 0

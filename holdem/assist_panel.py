@@ -6,7 +6,7 @@ from .terminal import wrap
 
 
 UNCERTAIN = '暂无法可靠判断'
-ASSUMPTION = '条件比较未预测对手后续反应，假设此后无额外下注；各情景沿用当前对手范围。'
+ASSUMPTION = '当前轮规则模型估计，未校准；最多一次对手反加，之后假设无额外下注。'
 
 
 def percent(value):
@@ -55,7 +55,7 @@ def change_summary(a):
     if not changes:
         return '独赢机会较上次没有明显变化。'
     return '；'.join(short(step['label'], 24)+f'：独赢机会 {step["win_delta"]*100:+.1f} 个百分点'
-                    for step in changes)+'（主要估计变化）。'
+                    for step in changes)+'（摊牌参照的主要估计变化）。'
 
 
 def path_summary(a):
@@ -78,14 +78,6 @@ def path_summary(a):
 
 def reasons(a):
     current = a['current']
-    threats = []
-    for opponent in a['ranges']:
-        for candidate in opponent['leading']:
-            category = candidate['description'].split(' · ')[0]
-            if category not in threats:
-                threats.append(category)
-    if threats:
-        current += '；可能落后于 '+ '、'.join(threats[:2])+' 等候选成牌'
     pressure = [p for p in a['ranges'] if any('下注' in e or '跟注' in e for e in p['evidence'])]
     if pressure:
         strongest = max(pressure, key=lambda p: sum('下注' in e for e in p['evidence']))
@@ -102,33 +94,19 @@ def reasons(a):
             ('选择依据', a['advice_reason'])]
 
 
-def comparison_rows(a):
-    reliable = a['ess'] >= 100
-    rows, sidepots = [], []
-    for choice in a['comparisons']:
-        action = choice['label']+f'（投入 {choice["paid"]}）'
-        if choice['action'] == 'fold':
-            rows.append((action, '放弃争夺', '—', '0（不再投入）'))
-            continue
-        for s in choice['scenarios']:
-            label = scenario_label(s)
-            # A pickup and a refund are deterministic within a forced scenario.
-            ev = f'{s["ev"]:+.1f}' if reliable or s['direct'] else UNCERTAIN
-            chance = '分池见下' if len(s['pot_results']) > 1 and not s['direct'] else odds(s, reliable)
-            rows.append((action, label, chance, ev))
-            if len(s['pot_results']) > 1 or s['excluded_pots']:
-                bits = []
-                for p in s['pot_results']:
-                    chance = odds(p, reliable)
-                    if not p['direct'] and reliable:
-                        chance = f'独赢 {percent(p["win"])} / 平局 {percent(p["tie"])}'
-                    bits.append(p['label']+f' {p["amount"]}：'+chance)
-                if s['excluded_pots']:
-                    bits.append('无资格争夺 '+ '、'.join(p['label']+f' {p["amount"]}' for p in s['excluded_pots']))
-                if s['refund']:
-                    bits.append(f'未被跟注退回 {s["refund"]}（不算获胜）')
-                sidepots.append((choice['label']+' / '+label, '；'.join(bits)))
-    return rows, sidepots
+def threat_entries(a, detail=False):
+    entries = []
+    for opponent in a['ranges']:
+        parts = []
+        for threat in opponent['threats']:
+            probability = percent(threat['prob']) if threat['prob'] >= .001 else '<0.1%'
+            text = threat['label']+' '+probability
+            if detail or threat['label'] in ('顺子', '同花顺'):
+                text += '（'+' / '.join(threat['families'][:None if detail else 2])+'）'
+            parts.append(text)
+        if parts:
+            entries.append((short(opponent['name']), '；'.join(parts)))
+    return entries
 
 
 def detail_sections(a):
@@ -157,8 +135,12 @@ def detail_sections(a):
             reliable = step['ess'] >= 100 and previous['ess'] >= 100
             changes.append((step['label'], f'独赢机会 {step["win_delta"]*100:+.1f} 个百分点' if reliable else UNCERTAIN))
         sections.append(('公开事件与胜率变化', changes))
-    if a['comparisons']:
-        sections.append(('各选择的取舍', [(c['label'], c['risk']+'。') for c in a['comparisons']]))
+    if a.get('prediction'):
+        entries = []
+        for c in a['prediction']['actions']:
+            entries.append((c['label'], f'被反加 {percent(c["reraise"])}；'
+                            f'反加后平均额外投入 {c["extra_paid"]:.1f}；退款均值 {c["refund"]:.1f}。'))
+        sections.append(('反加与追加投入', entries))
     return sections
 
 
@@ -191,53 +173,84 @@ def render(a, *, format='text', width=64):
     if a['inactive']:
         paragraph(a['reason'])
         return '\n'.join(lines)
-    paragraph('建议：'+a['advice'], bold=True)
+    prediction = a.get('prediction')
+    confidence = ' ｜ 信心：'+prediction['confidence']+'（模型内）' if prediction else ''
+    paragraph('建议：'+a['advice']+confidence, bold=True)
     lines.append('')
     paragraph(a['advice_reason'])
+    if prediction and prediction['backup']:
+        backup = prediction['backup']
+        paragraph('备选：'+backup['label']+f'（预计净收益 {backup["ev"]:+.1f}）。')
     heading('最终获胜机会')
-    reliable = a['ess'] >= 100
-    final = a['headline']
-    if len(final['pot_results']) > 1 or final['excluded_pots']:
-        for pot in final['pot_results']:
-            paragraph(pot['label']+f' {pot["amount"]}：'+odds(pot, reliable, headline=True), bold=True)
-        if final['excluded_pots']:
-            paragraph('无资格争夺：'+'、'.join(p['label'] for p in final['excluded_pots']))
-    else:
-        paragraph(odds(final, reliable, headline=True), bold=True)
-    lines.append('')
-    paragraph(f'第 {a["hand_number"]} 手 · {short(a["player_names"][a["seat"]])}视角 · '
-              f'{a["live_count"]} 人在局；假设本轮全部跟平，随后无额外下注至摊牌，基于公开信息估计。')
-    heading('选择对比')
-    if not md and a['comparisons']:
-        paragraph('概率顺序：独赢 / 平局')
+    reliable = (prediction['ess'] if prediction else a['ess']) >= 100-1e-9
+    final = prediction['best'] if prediction else a['headline']
+    if prediction:
+        if final['action'] == 'fold':
+            paragraph('弃牌后放弃争夺，不再追加投入。')
+        elif final['split']:
+            paragraph('采用首选动作，按可争夺底池分别看：')
+            lines.append('')
+            for pot in final['pot_results']:
+                bullet(pot['label'], f'可争夺概率 {percent(pot["presence"])}；该池可争夺时，获胜 {percent(pot["win"])}，'
+                       f'平局 {percent(pot["tie"])}')
+            if final['excluded_pots']:
+                paragraph('部分情景无资格争夺：'+'、'.join(p['label'] for p in final['excluded_pots']))
+        else:
+            paragraph(f'总获胜 {percent(final["win"])} ｜ 平局 {percent(final["tie"])} ｜ '
+                      f'落败 {percent(max(0.,1-final["win"]-final["tie"]))}', bold=True)
+            lines.append('')
+            paragraph(f'直接拿池 {percent(final["direct"])} ＋ 摊牌独赢 {percent(final["showdown"])}。')
         lines.append('')
-    rows, sidepots = comparison_rows(a)
-    if not rows:
-        paragraph('尚未轮到你或你已全押，暂无可执行选择。')
-    elif md:
-        lines += ['| 选择与本次投入 | 对手情景 | 独赢 / 平局 | 条件净收益 |',
-                  '|---|---|---|---:|']
-        lines.extend('| '+' | '.join(markdown(cell) for cell in row)+' |' for row in rows)
+        paragraph('以上按首选动作及模型内反加应对计算。')
     else:
-        previous_action = None
-        for action, label, chances, ev in rows:
-            if action != previous_action:
-                if lines[-1]:
-                    lines.append('')
+        if len(final['pot_results']) > 1 or final['excluded_pots']:
+            for pot in final['pot_results']:
+                paragraph(pot['label']+f' {pot["amount"]}：'+odds(pot, reliable, headline=True), bold=True)
+            if final['excluded_pots']:
+                paragraph('无资格争夺：'+'、'.join(p['label'] for p in final['excluded_pots']))
+        else:
+            paragraph(odds(final, reliable, headline=True), bold=True)
+        lines.append('')
+        paragraph('尚无可执行动作；以上为本轮跟平、之后无额外下注的摊牌参照。')
+    heading('选择对比')
+    if prediction:
+        rows = []
+        for n,c in enumerate(prediction['actions']):
+            chance = '分池见下' if c['split'] else percent(c['win'])
+            risk = '不再投入' if c['action'] == 'fold' else '亏损 '+percent(c['loss_risk'])
+            rows.append((('首选 ' if n == 0 else '')+c['label']+f'（投入 {c["paid"]}）',
+                         chance, f'{c["ev"]:+.1f}', risk))
+        if md:
+            lines += ['| 选择与本次投入 | 总获胜概率 | 预计净收益 | 主要风险 |', '|---|---:|---:|---|']
+            lines.extend('| '+' | '.join(markdown(cell) for cell in row)+' |' for row in rows)
+        else:
+            for action, chance, ev, risk in rows:
                 paragraph(action)
-            paragraph(f'{label}：{chances}；条件净收益 {ev}')
-            previous_action = action
+                paragraph(f'获胜 {chance} · 预计净收益 {ev} · {risk}')
+                lines.append('')
+        split_choices = [c for c in prediction['actions'] if c['split'] and c is not final]
+        if split_choices:
+            lines.append('')
+            paragraph('其他分池选择（概率以该池可争夺为条件）：')
+            if md:
+                lines.append('')
+            for c in split_choices:
+                bullet(c['label'], '；'.join(p['label']+f'：可争夺 {percent(p["presence"])} / 获胜 {percent(p["win"])}'
+                                           for p in c['pot_results']))
+    else:
+        paragraph('尚未轮到你或你已全押，暂无可执行选择。')
     lines.append('')
     paragraph(ASSUMPTION)
-    if rows:
-        paragraph('净收益从当前决策点计算，既往投入不重复扣除；退款不算获胜。')
-    if sidepots:
+    if prediction:
+        paragraph('以净收益为主排序；收益接近时优先减少投入。')
+        paragraph('净收益和亏损风险从当前决策点起算，既往投入不重复扣除；退款不算获胜。')
+    threats = threat_entries(a, a['detail'])
+    if threats:
+        heading('对手关键威胁')
+        paragraph('占比为各席候选范围中领先你的部分，并非已知持牌。')
         lines.append('')
-        paragraph('分池：以下概率按各个本人有资格争夺的底池分别展示。')
-        if md:
-            lines.append('')
-        for label, value in sidepots:
-            bullet(label, value)
+        for label,value in threats:
+            bullet(label,value)
     heading('为什么')
     for label, value in reasons(a):
         bullet(label, value)

@@ -118,10 +118,13 @@ def settle(s):
     s['log'].append('结算：' + ', '.join(f'{s["players"][i]["name"]} +{v}' for i, v in enumerate(awards) if v))
 
 
-def advance(s, after):
+def advance(s, after, *, stop_at_round_end=False):
     while True:
         if len(active(s)) == 1:
-            settle(s)
+            if stop_at_round_end:
+                s.update(turn=None, round_closed=True)
+            else:
+                settle(s)
             return
         s['pending'] = [i for i in s['pending'] if i in actionable(s)]
         actors = actionable(s)
@@ -131,6 +134,9 @@ def advance(s, after):
             s['turn'] = next_seat(s, after, s['pending'])
             return
         record(s, 'round_end')
+        if stop_at_round_end:
+            s.update(turn=None, round_closed=True)
+            return
         if s['street'] == 'river':
             settle(s)
             return
@@ -153,7 +159,7 @@ def legal(s):
     return dict(fold=True, check=call == 0, call=call, raise_to_min=s['current'] + s['min_raise'] if can_raise else None, raise_to_max=cap if can_raise else None)
 
 
-def act(s, seat, action, amount=None):
+def act(s, seat, action, amount=None, *, stop_at_round_end=False):
     if s['done'] or seat != s['turn']: raise ValueError('不是该座位行动')
     p = s['players'][seat]
     options = legal(s)
@@ -180,7 +186,7 @@ def act(s, seat, action, amount=None):
     s['log'].append(f'{p["name"]}: {action}' + (f' to {amount}' if amount is not None else ''))
     record(s, 'action', seat=seat, action=action, paid=before_stack-p['stack'],
         bet=p['bet'], opening=before_current == 0, all_in=p['stack'] == 0 and action != 'fold')
-    advance(s, seat)
+    advance(s, seat, stop_at_round_end=stop_at_round_end)
 
 
 def view(s, seat):
