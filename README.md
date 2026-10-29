@@ -111,3 +111,5 @@ python3 -m holdem --state .holdem/gambler.json table
 `new --players 8` 创建八人桌，默认仍为六人；`rename <全部对手昵称>` 按座位顺序修改五个或七个对手昵称，保留牌局进度。高级样式的八人桌在 80 列及以上使用双列面板，更窄时使用单列。
 
 `recover-unacted` 保留旧版未行动错位手牌的安全恢复功能，执行前自动生成带本机微秒时间戳的备份。
+
+Agent 教练：`coach context` 提供公开证据，`coach record --input report.json` 保存策略解释，`assist` 只展示匹配快照的报告。`coach review-context` 提供本手原始建议及结算。独立 CLI 不生成智能建议，没有报告时等待 Agent 分析。旧规则模拟不再作为默认建议来源。

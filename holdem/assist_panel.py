@@ -169,6 +169,21 @@ def render(a, *, format='text', width=64):
         else:
             lines.extend(wrap('• '+clean(label)+'：'+clean(value), width))
 
+    if a.get('review'):
+        heading('本手复盘')
+        paragraph('本手净盈亏 '+(f'{a["net"]:+d}' if a['net'] is not None else '未知')+f'；退回未跟注筹码 {a["refund"]}。')
+        paragraph('以下为按当前模型、仅使用当时可见信息的回放估计；输赢不代表决策好坏。')
+        for n,d in enumerate(a['decisions'],1):
+            c,b=d['actual'],d['best']
+            bullet(f'决策 {n}', c['label']+f'：获胜 {percent(c["win"])}，预计净收益 {c["ev"]:+.1f}；当时首选 '+b['label']+f'（{b["ev"]:+.1f}）。')
+        decisions=a['decisions'] if a['detail'] else sorted(a['decisions'],key=lambda d:(d['best']['ev']-d['actual']['ev'],d['actual']['paid']),reverse=True)[:2]
+        if decisions:
+            heading('关键决策')
+        for d in decisions:
+            c=d['actual']
+            bullet(c['label'], f'直接拿池 {percent(c["direct"])}；摊牌独赢 {percent(c["showdown"])}；平局 {percent(c["tie"])}；追加亏损风险 {percent(c["loss_risk"])}。实际输赢不能证明这是唯一正确选择。' if not c['split'] else '该动作涉及分池，不能合成一个整手胜率；应分别比较各池资格与收益。')
+        if a['reason']: paragraph(a['reason'])
+        return '\n'.join(lines)
     heading('辅助决策')
     if a['inactive']:
         paragraph(a['reason'])
@@ -244,6 +259,14 @@ def render(a, *, format='text', width=64):
     if prediction:
         paragraph('以净收益为主排序；收益接近时优先减少投入。')
         paragraph('净收益和亏损风险从当前决策点起算，既往投入不重复扣除；退款不算获胜。')
+    if prediction:
+        heading('各选项为什么')
+        for c in prediction['actions']:
+            if c['action']=='fold':
+                bullet(c['label'], '放弃争夺，避免追加损失；0% 不是当前牌力胜率。')
+                continue
+            parts = ('；'.join(p['label']+f'形成且可争夺 {percent(p["presence"])}，条件下直接拿池 {percent(p["direct"])}、摊牌独赢 {percent(p["showdown"])}、平局 {percent(p["tie"])}' for p in c['pot_results']) if c['split'] else f'直接拿池 {percent(c["direct"])}，摊牌独赢 {percent(c["showdown"])}，平局 {percent(c["tie"])}')
+            bullet(c['label'], parts+f'；遭遇反加 {percent(c["reraise"])}。继续留场的对手仍可能领先或反超；追加亏损风险 '+percent(c['loss_risk'])+'。'+('过牌无需追加筹码，但仍可能输掉争夺。' if c['action']=='check' else '')+('首选综合预计收益与投入；接近时优先少投入。' if c is final else f'相对首选预计净收益差 {c["ev"]-final["ev"]:+.1f}，本次投入 {c["paid"]}。'))
     threats = threat_entries(a, a['detail'])
     if threats:
         heading('对手关键威胁')

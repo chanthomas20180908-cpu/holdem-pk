@@ -194,7 +194,7 @@ class AssistTests(unittest.TestCase):
             second=subprocess.run(command,check=True,capture_output=True,text=True).stdout
             self.assertEqual(first,second)
             self.assertEqual(p.read_bytes(),before)
-            self.assertIn('【对手公开证据】',first)
+            self.assertIn('等待当前 Agent',first)
             self.assertNotIn('【范围规则】',first)
             plain=subprocess.run(command[:-3],check=True,capture_output=True,text=True).stdout
             self.assertNotIn('辅助分析',plain)

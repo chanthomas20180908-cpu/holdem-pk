@@ -76,3 +76,7 @@
 - `new --players 8` 创建独立八人桌；默认仍为六人，额外两席为山猫、远帆，标准模式分别采用观察位置与选择性进攻的风格。
 - `rename <按座位排列的全部对手昵称>` 修改昵称，不重开手牌。
 - 辅助器可与 `--style plain|rich|chat` 组合，保持用户已选择的展示样式。
+
+## Agent 教练协议（优先于上文旧概率面板规则）
+开启辅助时，Agent 使用 `coach context` 的用户视角公开数据进行策略分析，通过 `coach record --input <JSON>` 保存并渲染报告，再原样展示。没有报告时不调用旧预测排名替代智能分析。JSON 包含 snapshot_id、action、raise 时的 target，以及 recommendation、reason、alternative、plan。正文约150–250字，具体解释价值／诈唬目的、合理对手范围和后续应对，不罗列概率表、不声称 GTO 或真实持牌概率。不得使用主持其他座位时看到的隐藏信息。
+结束时使用 `coach review-context`，报告增加 lesson、self_review：实际结果、一个关键决策、可迁移方法和教练自检。历史未留档的建议只能标为回放，不能冒充当时建议。`coach equity` 接收 snapshot_id 和 range（双牌码数组列表），首版支持翻牌后单挑等权明确范围精确核验；这是条件权益，不是对手真实范围。
