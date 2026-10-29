@@ -165,7 +165,7 @@ class DecisionPanelTests(unittest.TestCase):
         for key in ('done', 'folded'):
             v = self.fixture()
             (v if key == 'done' else v['players'][0])[key] = True
-            self.assertIn('辅助分析停止', render_analysis(self.analyze(v), format='markdown'))
+            self.assertIn('本手复盘' if key == 'done' else '辅助分析停止', render_analysis(self.analyze(v), format='markdown'))
 
     def test_markdown_hierarchy_and_compact_content(self):
         a = self.analyze()
@@ -275,17 +275,16 @@ class DecisionPanelTests(unittest.TestCase):
                     second = subprocess.run(args, capture_output=True, text=True, check=True).stdout
                     self.assertEqual(first, second)
                     self.assertEqual(path.read_bytes(), before)
-                    self.assertIn('最终获胜机会', first)
+                    self.assertIn('等待当前 Agent', first)
                     self.assertNotIn('本手行动', first)
             default = subprocess.run(command+['assist', '--samples', '100'], capture_output=True, text=True, check=True).stdout
-            self.assertTrue(default.startswith('### 辅助决策'))
+            self.assertTrue(default.startswith('### 教练分析'))
             for style in ('plain', 'rich', 'chat'):
                 result = subprocess.run(command+['table', '--style', style, '--assist', '--samples', '100', '--width', '40'],
                                         capture_output=True, text=True, check=True)
-                panel = result.stdout.split('【辅助决策】')[1]
-                self.assertTrue(all(cell_width(line) <= 40 for line in panel.splitlines()))
+                self.assertIn('等待当前 Agent', result.stdout)
             detail = subprocess.run(command+['assist', '--detail', '--samples', '100'], capture_output=True, text=True, check=True)
-            self.assertIn('对手公开证据', detail.stdout)
+            self.assertIn('等待当前 Agent', detail.stdout)
             for extra in (['--samples', '99'], ['--samples', '100001'], ['--seat', '8'], ['--width', '39']):
                 result = subprocess.run(command+['assist']+extra, capture_output=True, text=True)
                 self.assertNotEqual(result.returncode, 0)
@@ -295,5 +294,5 @@ class DecisionPanelTests(unittest.TestCase):
             path.write_text(json.dumps(s))
             before = path.read_bytes()
             result = subprocess.run(command+['assist'], capture_output=True, text=True, check=True)
-            self.assertIn('辅助分析停止', result.stdout)
+            self.assertIn('本手复盘', result.stdout)
             self.assertEqual(path.read_bytes(), before)

@@ -28,6 +28,8 @@ def public_snapshot(view, seat=0):
                           'name':p.get('name',str(i))} for i,p in enumerate(view['players'])],
                 turn=view['turn'],done=view['done'],button=view['button'],events=events,
                 history_complete=view.get('history_complete',False),
+                hand_start_stacks=list(view.get('hand_start_stacks',[])),
+                settlement={k:view[k] for k in ('awards','refunds') if k in view},
                 legal=dict(view.get('legal',{})) if view['turn']==seat else {})
 
 
@@ -364,7 +366,10 @@ def replay(v,samples,seed):
 def analyze(v,samples=2000,seed=None,detail=False):
     if not 100<=samples<=100000: raise ValueError('模拟次数必须在 100–100000 之间')
     seat=v['seat']; hero=v['players'][seat]
-    if v['done'] or hero['folded'] or len(v['hole'])!=2:
+    if v['done']:
+        from .review import review
+        return review(v, samples, seed, detail)
+    if hero['folded'] or len(v['hole'])!=2:
         return dict(inactive=True,reason='本手已结束或你已弃牌／未入局，辅助分析停止。')
     known=v['hole']+v['board']
     if len(set(known))!=len(known) or any(c not in DECK for c in known) or len(v['board']) not in (0,3,4,5):
