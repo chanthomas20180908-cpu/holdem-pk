@@ -113,3 +113,28 @@ python3 -m holdem --state .holdem/gambler.json table
 `recover-unacted` 保留旧版未行动错位手牌的安全恢复功能，执行前自动生成带本机微秒时间戳的备份。
 
 Agent 教练：`coach context` 提供公开证据，`coach record --input report.json` 保存策略解释，`assist` 只展示匹配快照的报告。`coach review-context` 提供本手原始建议及结算。独立 CLI 不生成智能建议，没有报告时等待 Agent 分析。旧规则模拟不再作为默认建议来源。
+
+## 本地网页竞技场（开发版）
+
+在本工作树运行：
+
+```sh
+npm ci --prefix frontend
+npm run build --prefix frontend
+python3 -m holdem.web --state .holdem/web.json --port 8765
+```
+
+访问 http://127.0.0.1:8765 。新桌不会覆盖已有存档；使用 `--state` 选择独立牌局，已有牌局自动恢复。服务只监听本机。不要在服务运行时通过旧 `holdem act/next` 写入同一存档。
+
+当前 Codex 会话通过以下桥接主持，不启动模型 API 或随机机器人：
+
+```sh
+python3 -m holdem.host --state .holdem/web.json wait
+python3 -m holdem.host --state .holdem/web.json act --seat 3 --version <wait返回的version> --action call
+```
+
+`wait` 最长等待 50 秒，只返回当前行动席位的视角。每次动作后重新 wait；轮到用户时继续等待网页输入；本手结束后停止，用户点击下一手后再恢复主持。老赌鬼模式仍须遵循 GAMBLER.md。主持凭据只留在同目录 `.host-token`，不要发送给网页或提交 Git。当前会话结束后网页不会自动启动新 Agent。
+
+教练继续使用已有 `coach context/record/review-context`，明确指定服务相同的 `--state`；报告绑定快照，网页只展示匹配报告。网页支持音效/动态开关、六八人桌、下注、下一手、教练和完整文本记录。
+
+本版已接入真实规则；高级逐事件筹码飞行、逐池胜利演出、完整原创角色插画仍待补齐。不可将浏览器原型验收视为长期无人值守主持验收。
